@@ -9,8 +9,8 @@ module sddr_phy_xilinx#(
     (
         // Inside interfaces
         input in_ddr_clock_i,
-        input in_ddr_reset_p_i,
-        input in_phy_reset_p_i,
+        input in_ddr_reset_n_i,
+        input in_phy_reset_n_i,
 
 
         // Outside interfaces
@@ -34,18 +34,19 @@ module sddr_phy_xilinx#(
         inout [DATA_BITS-1:0]                           ddr3_dq_io
     );
 
-assign ddr3_reset_n_o = !in_ddr_reset_p_i;
+assign ddr3_reset_n_o = in_ddr_reset_n_i;
 assign ddr3_cs_n_o = 1'b0;      // We don't do chip select
+assign ddr3_cke_o = 1'b0;
 
 // Clock differential output
 reg naked_clock_signal;
 ODDR clock_signal_generator(
     .Q(naked_clock_signal),
     .C(in_ddr_clock_i),
-    .CE(!in_phy_reset_p_i),
+    .CE(in_phy_reset_n_i),
     .D1(1'b1),
     .D2(1'b0),
-    .R(!in_phy_reset_p_i),
+    .R(!in_phy_reset_n_i),
     .S(1'b0)
 );
 
