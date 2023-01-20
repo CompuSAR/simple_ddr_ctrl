@@ -50,24 +50,42 @@ module sddr_ctrl#(
 
 assign ddr3_cs_n_o = 1'b0;      // We don't do chip select
 
-assign ctrl_cmd_ack = 1'b1;
+logic [31:0] reset_state_cpu=0, reset_state_ddr=0; // reset state for the CPU and DDR clock domains
+logic reset_state_cpu_send=1'b0, reset_state_ddr_recv=1'b0;
+xpm_cdc_handshake#(.DEST_EXT_HSK(0), .SIM_ASSERT_CHK(1), .SRC_SYNC_FF(2), .WIDTH(32))
+reset_state_cdc(
+    .dest_clk(ddr_clock_i),
+    .src_clk(cpu_clock_i), .src_in(reset_state_cpu), .src_send(reset_state_cpu_send)
+);
 
-logic [31:0] reset_state;
-assign ddr_reset_n_o = reset_state[0];
-assign ddr_phy_reset_n_o = reset_state[1];
-logic ctrl_reset = reset_state[2];
-logic bypass = !reset_state[3];
-assign ddr3_odt_o = reset_state[4];
-assign ddr3_cke_o = reset_state[5];
+assign ctrl_cmd_ack = !reset_state_cpu_send && !reset_state_cdc.src_rcv;
 
+assign ddr_reset_n_o = reset_state_ddr[0];
+assign ddr_phy_reset_n_o = reset_state_ddr[1];
+logic ctrl_reset = reset_state_ddr[2];
+logic bypass = !reset_state_ddr[3];
+assign ddr3_odt_o = reset_state_ddr[4];
+assign ddr3_cke_o = reset_state_ddr[5];
+
+// CPU clock domain
 always_ff@(posedge cpu_clock_i) begin
-    if( ctrl_cmd_valid && ctrl_cmd_write ) begin
+    if( reset_state_cdc.src_rcv )
+        reset_state_cpu_send <= 1'b0;
+
+    if( ctrl_cmd_valid && ctrl_cmd_ack && ctrl_cmd_write ) begin
         case(ctrl_cmd_address)
             16'h0000: begin     // Reset state
-                reset_state <= ctrl_cmd_data;
+                reset_state_cpu <= ctrl_cmd_data;
+                reset_state_cpu_send <= 1'b1;
             end
         endcase
     end
+end
+
+// DDR clock domain
+always_ff@(posedge ddr_clock_i) begin
+    if( reset_state_cdc.dest_req )
+        reset_state_ddr <= reset_state_cdc.dest_out;
 end
 
 endmodule

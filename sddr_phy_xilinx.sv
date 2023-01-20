@@ -44,18 +44,19 @@ module sddr_phy_xilinx#(
 
 assign ddr3_reset_n_o = in_ddr_reset_n_i;
 assign ddr3_cs_n_o = 1'b0;      // We don't do chip select
-//assign ddr3_cke_o = ctl_cke_i;
 //IOBUF odt_buffer( .I(ctl_odt_i), .T(!ddr3_reset_n_o), .IO(ddr3_odt_o), .O() );
 
-always_ff@(negedge naked_clock_signal) begin
+logic phy_reset_n, phy_reset_p;
+xpm_cdc_sync_rst cdc_reset(.src_rst(in_phy_reset_n_i), .dest_clk(in_ddr_clock_i), .dest_rst(phy_reset_n));
+
+always_ff@(negedge in_ddr_clock_i) begin
     ddr3_cke_o <= ctl_cke_i;
     ddr3_ras_n_o <= ctl_ras_n_i;
     ddr3_cas_n_o <= ctl_cas_n_i;
     ddr3_we_n_o <= ctl_we_n_i;
-end
 
-logic phy_reset_n;
-xpm_cdc_sync_rst cdc_reset(.src_rst(in_phy_reset_n_i), .dest_clk(in_ddr_clock_i), .dest_rst(phy_reset_n));
+    phy_reset_p <= !phy_reset_n;
+end
 
 // Clock differential output
 logic naked_clock_signal;
@@ -65,7 +66,7 @@ ODDR clock_signal_generator(
     .CE(phy_reset_n),
     .D1(1'b1),
     .D2(1'b0),
-    .R(!phy_reset_n),
+    .R(phy_reset_p),
     .S(1'b0)
 );
 
