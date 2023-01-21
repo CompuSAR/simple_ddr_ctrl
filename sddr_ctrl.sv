@@ -10,7 +10,7 @@ module sddr_ctrl#(
     (
         // Control lines
         input cpu_clock_i,
-        input ddr_clock_i,
+        //input ddr_clock_i,
         output ddr_reset_n_o,
         output ddr_phy_reset_n_o,
 
@@ -48,49 +48,36 @@ module sddr_ctrl#(
         input [DATA_BITS-1:0]                           ddr3_dq_i
     );
 
-logic [31:0] reset_state_cpu=0, reset_state_ddr=0; // reset state for the CPU and DDR clock domains
-logic reset_state_cpu_send=1'b0;
-xpm_cdc_handshake#(.DEST_EXT_HSK(0), .SIM_ASSERT_CHK(1), .SRC_SYNC_FF(2), .WIDTH(32))
-reset_state_cdc(
-    .dest_clk(ddr_clock_i),
-    .src_clk(cpu_clock_i), .src_in(reset_state_cpu), .src_send(reset_state_cpu_send)
-);
+wire ddr_clock_i = cpu_clock_i;
 
-// Bits: A10, CS, RAS, CAS, WE.
-logic [4:0] override_cmd_cpu=32'b00111, output_cmd;
+logic [31:0] reset_state=0; // State of the reset signals
+
+// Bits: CS, RAS, CAS, WE.
+logic [3:0] override_cmd_cpu, output_cmd;
+logic override_cmd_cpu_send = 1'b0;
+
 assign ddr3_we_n_o = output_cmd[0];
 assign ddr3_cas_n_o = output_cmd[1];
 assign ddr3_ras_n_o = output_cmd[2];
 assign ddr3_cs_n_o = output_cmd[3];
-logic override_cmd_cpu_send=1'b0;
 
-xpm_cdc_handshake#(.DEST_EXT_HSK(0), .SIM_ASSERT_CHK(1), .SRC_SYNC_FF(2), .WIDTH(5))
-override_cmd_cdc(
-    .dest_clk(ddr_clock_i),
-    .src_clk(cpu_clock_i), .src_in(override_cmd_cpu), .src_send(override_cmd_cpu_send)
-);
+assign ctrl_cmd_ack = 1'b1;
 
-assign ctrl_cmd_ack =
-    !reset_state_cpu_send && !reset_state_cdc.src_rcv &&
-    !override_cmd_cpu_send && !override_cmd_cdc.src_rcv;
-
-assign ddr_reset_n_o = reset_state_ddr[0];
-assign ddr_phy_reset_n_o = reset_state_ddr[1];
-logic ctrl_reset = reset_state_ddr[2];
-logic bypass = !reset_state_ddr[3];
-assign ddr3_odt_o = reset_state_ddr[4];
-assign ddr3_cke_o = reset_state_ddr[5];
+assign ddr_reset_n_o            = reset_state[0];
+assign ddr_phy_reset_n_o        = reset_state[1];
+logic ctrl_reset                = reset_state[2];
+logic bypass                    = !reset_state[3];
+assign ddr3_odt_o               = reset_state[4];
+assign ddr3_cke_o               = reset_state[5];
 
 // CPU clock domain
 always_ff@(posedge cpu_clock_i) begin
-    if( reset_state_cdc.src_rcv )
-        reset_state_cpu_send <= 1'b0;
+    override_cmd_cpu_send <= 1'b0;
 
     if( ctrl_cmd_valid && ctrl_cmd_ack && ctrl_cmd_write ) begin
         case(ctrl_cmd_address)
             16'h0000: begin     // Reset state
-                reset_state_cpu <= ctrl_cmd_data;
-                reset_state_cpu_send <= 1'b1;
+                reset_state <= ctrl_cmd_data;
             end
             16'h0004: begin     // Override command
                 override_cmd_cpu <= ctrl_cmd_data;
@@ -102,14 +89,10 @@ end
 
 // DDR clock domain
 always_ff@(posedge ddr_clock_i) begin
-    if( reset_state_cdc.dest_req )
-        reset_state_ddr <= reset_state_cdc.dest_out;
-
-    if( !reset_state_ddr[3] /* override */ && override_cmd_cdc.dest_req ) begin
-        output_cmd <= override_cmd_cdc.dest_out;
-        ddr3_addr_o[10] <= override_cmd_cdc.dest_out[4];
+    if( !reset_state[3] /* override */ && override_cmd_cpu_send ) begin
+        output_cmd <= override_cmd_cpu; // Remant from the days we had separate CPU and DDR clocks
     end else begin
-        output_cmd <= 5'b00111; // NOP
+        output_cmd <= 5'b0111; // NOP
     end
 end
 
