@@ -15,10 +15,12 @@ module sddr_phy_xilinx#(
 
         // Controller's gonna control
         input                                           ctl_odt_i,
+        input                                           ctl_cs_n_i,
         input                                           ctl_cke_i,
         input                                           ctl_ras_n_i,
         input                                           ctl_cas_n_i,
         input                                           ctl_we_n_i,
+        input                                           ctl_addr_i,
 
 
         // Outside interfaces
@@ -43,8 +45,8 @@ module sddr_phy_xilinx#(
     );
 
 assign ddr3_reset_n_o = in_ddr_reset_n_i;
-assign ddr3_cs_n_o = 1'b0;      // We don't do chip select
-//IOBUF odt_buffer( .I(ctl_odt_i), .T(!ddr3_reset_n_o), .IO(ddr3_odt_o), .O() );
+assign ddr3_cs_n_o = ctl_cs_n_i;
+IOBUF odt_buffer( .I(ctl_odt_i), .T(!ddr3_reset_n_o), .IO(ddr3_odt_o), .O() );
 
 logic phy_reset_n, phy_reset_p;
 xpm_cdc_sync_rst cdc_reset(.src_rst(in_phy_reset_n_i), .dest_clk(in_ddr_clock_i), .dest_rst(phy_reset_n));
