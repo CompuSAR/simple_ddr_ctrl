@@ -20,7 +20,8 @@ module sddr_phy_xilinx#(
         input                                           ctl_ras_n_i,
         input                                           ctl_cas_n_i,
         input                                           ctl_we_n_i,
-        input                                           ctl_addr_i,
+        input [ROW_BITS+$clog2(DATA_BITS/8)-1:0]        ctl_addr_i,
+        input [BANK_BITS-1:0]                           ctl_ba_i,
 
 
         // Outside interfaces
@@ -35,8 +36,8 @@ module sddr_phy_xilinx#(
 
         output                                          ddr3_cs_n_o,
 
-        output [BANK_BITS-1:0]                          ddr3_ba_o,
-        output [ROW_BITS+$clog2(DATA_BITS/8)-1:0]       ddr3_addr_o,
+        output logic [BANK_BITS-1:0]                    ddr3_ba_o,
+        output logic [ROW_BITS+$clog2(DATA_BITS/8)-1:0] ddr3_addr_o,
         inout                                           ddr3_odt_o,
         output [$clog2(DATA_BITS/8):0]                  ddr3_dm_o,
         inout [$clog2(DATA_BITS/8):0]                   ddr3_dqs_p_io,
@@ -56,6 +57,9 @@ always_ff@(negedge in_ddr_clock_i) begin
     ddr3_ras_n_o <= ctl_ras_n_i;
     ddr3_cas_n_o <= ctl_cas_n_i;
     ddr3_we_n_o <= ctl_we_n_i;
+
+    ddr3_addr_o <= ctl_addr_i;
+    ddr3_ba_o <= ctl_ba_i;
 
     phy_reset_p <= !phy_reset_n;
 end

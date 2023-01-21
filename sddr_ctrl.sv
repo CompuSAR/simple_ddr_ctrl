@@ -38,7 +38,7 @@ module sddr_ctrl#(
 
         output                                          ddr3_cs_n_o,
 
-        output [BANK_BITS-1:0]                          ddr3_ba_o,
+        output logic [BANK_BITS-1:0]                    ddr3_ba_o,
         output logic [ROW_BITS+$clog2(DATA_BITS/8)-1:0] ddr3_addr_o,
         output                                          ddr3_odt_o,
         output [$clog2(DATA_BITS/8):0]                  ddr3_dm_o,
@@ -55,6 +55,7 @@ logic [31:0] reset_state=0; // State of the reset signals
 // Bits: CS, RAS, CAS, WE.
 logic [3:0] override_cmd_cpu, output_cmd;
 logic override_cmd_cpu_send = 1'b0;
+logic [31:0] override_addr;
 
 assign ddr3_we_n_o = output_cmd[0];
 assign ddr3_cas_n_o = output_cmd[1];
@@ -83,6 +84,9 @@ always_ff@(posedge cpu_clock_i) begin
                 override_cmd_cpu <= ctrl_cmd_data;
                 override_cmd_cpu_send <= 1'b1;
             end
+            16'h0008: begin     // Override address
+                override_addr <= ctrl_cmd_data;
+            end
         endcase
     end
 end
@@ -90,9 +94,13 @@ end
 // DDR clock domain
 always_ff@(posedge ddr_clock_i) begin
     if( !reset_state[3] /* override */ && override_cmd_cpu_send ) begin
+        ddr3_addr_o <= override_addr;
+        ddr3_ba_o <= override_addr[31:31-BANK_BITS+1];
         output_cmd <= override_cmd_cpu; // Remant from the days we had separate CPU and DDR clocks
     end else begin
         output_cmd <= 5'b0111; // NOP
+        ddr3_addr_o <= 0;
+        ddr3_ba_o <= 0;
     end
 end
 
