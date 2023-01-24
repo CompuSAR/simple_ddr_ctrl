@@ -10,6 +10,7 @@ module sddr_phy_xilinx#(
         // Inside interfaces
         input in_cpu_clock_i,
         input in_ddr_clock_i,
+        input in_ddr_clock_90deg_i,
         input in_ddr_reset_n_i,
         input in_phy_reset_n_i,
 
@@ -22,6 +23,11 @@ module sddr_phy_xilinx#(
         input                                           ctl_we_n_i,
         input [ROW_BITS+$clog2(DATA_BITS/8)-1:0]        ctl_addr_i,
         input [BANK_BITS-1:0]                           ctl_ba_i,
+        input [DATA_BITS*2-1:0]                         ctl_dq_i,
+        output [DATA_BITS*2-1:0]                        ctl_dq_o,
+
+        input                                           ctl_data_transfer_i,
+        input                                           ctl_data_write_i,
 
 
         // Outside interfaces
@@ -39,12 +45,13 @@ module sddr_phy_xilinx#(
         output logic [BANK_BITS-1:0]                    ddr3_ba_o,
         output logic [ROW_BITS+$clog2(DATA_BITS/8)-1:0] ddr3_addr_o,
         inout                                           ddr3_odt_o,
-        output [$clog2(DATA_BITS/8):0]                  ddr3_dm_o,
-        inout [$clog2(DATA_BITS/8):0]                   ddr3_dqs_p_io,
-        inout [$clog2(DATA_BITS/8):0]                   ddr3_dqs_n_io,
+        output [DATA_BITS/8-1:0]                        ddr3_dm_o,
+        inout [DATA_BITS/8-1:0]                         ddr3_dqs_p_io,
+        inout [DATA_BITS/8-1:0]                         ddr3_dqs_n_io,
         inout [DATA_BITS-1:0]                           ddr3_dq_io
     );
 
+assign ddr3_dm_o = { DATA_BITS/8{1'b1} };
 assign ddr3_reset_n_o = in_ddr_reset_n_i;
 assign ddr3_cs_n_o = ctl_cs_n_i;
 IOBUF odt_buffer( .I(ctl_odt_i), .T(!ddr3_reset_n_o), .IO(ddr3_odt_o), .O() );
@@ -81,5 +88,41 @@ OBUFDS clock_buffer(
     .O(ddr3_ck_p_o),
     .OB(ddr3_ck_n_o)
 );
+
+genvar i;
+generate
+    for(i=0; i<DATA_BITS/8; i++) begin : dqs_gen
+        logic dqs;
+        IOBUFDS dqs_buffer(.IO(ddr3_dqs_p_io[i]), .IOB(ddr3_dqs_n_io[i]), .O(dqs), .I(in_ddr_clock_90deg_i), .T(ctl_data_write_i));
+    end : dqs_gen
+
+    for(i=0; i<DATA_BITS; i++) begin : data_gen
+        logic in_data_bit, out_data_bit;
+        IOBUF data_buf(
+            .IO(ddr3_dq_io[i]),
+            .I(out_data_bit),
+            .O(in_data_bit),
+            .T(!ctl_data_write_i)
+        );
+        ODDR#(.DDR_CLK_EDGE("SAME_EDGE")) data_out_ddr(
+            .Q(out_data_bit),
+            .C(in_ddr_clock_i),
+            .CE(ctl_data_transfer_i),
+            .D1(ctl_dq_i[i]),
+            .D2(ctl_dq_i[i+DATA_BITS]),
+            .R(1'b0),
+            .S(1'b0)
+        );
+        IDDR#(.DDR_CLK_EDGE("SAME_EDGE_PIPELINED")) data_in_ddr(
+            .C(dqs_gen[i/8].dqs),
+            .CE(1'b1),
+            .D(in_data_bit),
+            .Q1(ctl_dq_o[i]),
+            .Q2(ctl_dq_o[i+DATA_BITS]),
+            .R(1'b0),
+            .S(1'b0)
+        );
+    end : data_gen
+endgenerate
 
 endmodule

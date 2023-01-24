@@ -25,9 +25,12 @@ module sddr_ctrl#(
 
         // Data interfaces
         input                                           data_cmd_valid,
+        input [BANK_BITS+ROW_BITS+COL_BITS+$clog2(DATA_BITS/8)-1:0]
+                                                        data_cmd_address,
+        input                                           data_cmd_write,
         output                                          data_cmd_ack,
         output                                          data_rsp_ready,
-        input [BURST_LENGTH*DATA_BITS-1:0]              data_data_i,
+        input [BURST_LENGTH*DATA_BITS-1:0]              data_cmd_data_i,
         input [BURST_LENGTH*DATA_BITS-1:0]              data_data_o,
 
         // phy interfaces
@@ -41,11 +44,13 @@ module sddr_ctrl#(
         output logic [BANK_BITS-1:0]                    ddr3_ba_o,
         output logic [ROW_BITS+$clog2(DATA_BITS/8)-1:0] ddr3_addr_o,
         output                                          ddr3_odt_o,
-        output [$clog2(DATA_BITS/8):0]                  ddr3_dm_o,
-        output [$clog2(DATA_BITS/8):0]                  ddr3_dqs_o,
-        input [$clog2(DATA_BITS/8):0]                   ddr3_dqs_i,
-        output [DATA_BITS-1:0]                          ddr3_dq_o,
-        input [DATA_BITS-1:0]                           ddr3_dq_i
+        output [DATA_BITS/8-1:0]                        ddr3_dm_o,
+        output                                          ddr3_dq_enable_o,
+        output [DATA_BITS*2-1:0]                        ddr3_dq_o,
+        input [DATA_BITS*2-1:0]                         ddr3_dq_i,
+
+        output                                          data_transfer_o,
+        output                                          data_write_o
     );
 
 wire ddr_clock_i = cpu_clock_i;
