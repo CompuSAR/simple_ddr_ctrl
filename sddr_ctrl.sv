@@ -46,14 +46,27 @@ module sddr_ctrl#(
         output                                          ddr3_odt_o,
         output [DATA_BITS/8-1:0]                        ddr3_dm_o,
         output                                          ddr3_dq_enable_o,
-        output [DATA_BITS*2-1:0]                        ddr3_dq_o,
-        input [DATA_BITS*2-1:0]                         ddr3_dq_i,
+        output [DATA_BITS-1:0]                          ddr3_dq_o[1:0],
+        input [DATA_BITS-1:0]                           ddr3_dq_i[1:0],
 
         output                                          data_transfer_o,
-        output                                          data_write_o
+        output logic                                    data_write_o
     );
 
+typedef enum {
+    RegResetState = 0,
+    RegOverrideCmd,
+    RegOverrideAddr,
+    RegClCwl,
+    RegtRCD,            // Activate to read/write
+    RegtRC,             // Activate to Activate or Refresh
+    RegtRP              // PRECHARGE command period
+} RegisterAddresses;
+
 wire ddr_clock_i = cpu_clock_i;
+
+logic [31:0] tRCD, tRC, tRP;
+logic [15:0] casReadLatency, casWriteLatency;
 
 logic [31:0] reset_state=0; // State of the reset signals
 
@@ -77,28 +90,47 @@ assign ddr3_odt_o               = reset_state[4];
 //assign ddr3_cke_o               = reset_state[5];
 
 localparam ADDRESS_BITS = BANK_BITS+ROW_BITS+COL_BITS+$clog2(DATA_BITS/8);
+localparam HALF_BURST_LENGTH = BURST_LENGTH/2;
 
-logic [BURST_LENGTH*DATA_BITS-1:0] latched_write_value, write_value;
+logic [BURST_LENGTH*DATA_BITS-1:0] latched_write_value;
 logic [ADDRESS_BITS-1:0] latched_address;
+logic [HALF_BURST_LENGTH*DATA_BITS-1:0] write_value[1:0];
 enum { STATE_IDLE, STATE_WRITE, STATE_READ } state = STATE_IDLE, prev_state = STATE_IDLE;
 
 assign data_cmd_ack = state==STATE_IDLE && reset_state[3] /* override off */;
+assign ddr3_dq_o[0] = write_value[0][DATA_BITS-1:0];
+assign ddr3_dq_o[1] = write_value[1][DATA_BITS-1:0];
 
 // CPU clock domain
 always_ff@(posedge cpu_clock_i) begin
     override_cmd_cpu_send <= 1'b0;
 
     if( ctrl_cmd_valid && ctrl_cmd_ack && ctrl_cmd_write ) begin
-        case(ctrl_cmd_address)
-            16'h0000: begin     // Reset state
+        RegisterAddresses command;
+        $cast(command, ctrl_cmd_address[15:2]);
+        case(command)
+            RegResetState: begin
                 reset_state <= ctrl_cmd_data;
             end
-            16'h0004: begin     // Override command
+            RegOverrideCmd: begin
                 override_cmd_cpu <= ctrl_cmd_data;
                 override_cmd_cpu_send <= 1'b1;
             end
-            16'h0008: begin     // Override address
+            RegOverrideAddr: begin
                 override_addr <= ctrl_cmd_data;
+            end
+            RegClCwl: begin
+                casReadLatency <= ctrl_cmd_data[15:0];
+                casWriteLatency <= ctrl_cmd_data[31:16];
+            end
+            RegtRCD: begin
+                tRCD <= ctrl_cmd_data;
+            end
+            RegtRC: begin
+                tRC <= ctrl_cmd_data;
+            end
+            RegtRP: begin
+                tRP <= ctrl_cmd_data;
             end
         endcase
     end
@@ -112,7 +144,7 @@ always_ff@(posedge cpu_clock_i) begin
     end
 end
 
-enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP } bank_state = BS_PRECHARGED;
+enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_WRITE, BS_OP_END } bank_state = BS_PRECHARGED;
 int bank_state_counter = 0;
 
 // DDR clock domain
@@ -144,10 +176,69 @@ always_ff@(posedge ddr_clock_i) begin
                     ddr3_ba_o <= latched_address[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
                     ddr3_addr_o <= latched_address[COL_BITS+ROW_BITS-1:COL_BITS];
                     bank_state <= BS_OP;
+                    bank_state_counter <= tRCD;
+                end
+                BS_OP: begin
+                    if( state==STATE_READ ) begin
+                        output_cmd <= 4'b0101;  // Read
+                        bank_state <= BS_READ;
+                        bank_state_counter <= casReadLatency;
+                    end else begin
+                        output_cmd <= 4'b0100;  // Write
+                        bank_state <= BS_WRITE;
+                        bank_state_counter <= casWriteLatency;
+                    end
+                    ddr3_ba_o <= latched_address[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
+                    ddr3_addr_o <= 0;
+                    ddr3_addr_o[9:0] <= latched_address[$clog2(DATA_BITS/8)+COL_BITS-1:$clog2(DATA_BITS/8)];
+                    if( COL_BITS>10 )
+                        ddr3_addr_o[11] = latched_address[$clog2(DATA_BITS/8)+10];
+                    ddr3_addr_o[10] = 1'b1;       // Auto precharge
+                end
+                BS_WRITE: begin
+                    data_write_o <= 1'b1;
+                    bank_state_counter <= BURST_LENGTH-1;
+                    bank_state <= BS_OP_END;
+                end
+                BS_OP_END: begin
+                    data_write_o <= 1'b0;
+
+                    bank_state <= BS_PRECHARGED;
+                    bank_state_counter <= tRP;
                 end
             endcase
         end
     end
 end
+
+
+genvar i;
+generate
+
+for( i=0; i<HALF_BURST_LENGTH; i++ ) begin : write_value_gen
+    always_ff@(posedge ddr_clock_i) begin
+        if( bank_state==BS_WRITE && bank_state_counter==0 ) begin
+            write_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] = latched_write_value[ i*2*DATA_BITS+DATA_BITS-1:i*2*DATA_BITS ];
+        end else begin
+            if( i<HALF_BURST_LENGTH-1 )
+                write_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] = write_value[0][(i+2)*DATA_BITS-1:(i+1)*DATA_BITS];
+            else
+                write_value[0][HALF_BURST_LENGTH*DATA_BITS-1:(HALF_BURST_LENGTH-1)*DATA_BITS] = { DATA_BITS{1'bX} };
+        end
+    end
+
+    always_ff@(negedge ddr_clock_i) begin
+        if( bank_state==BS_WRITE && bank_state_counter==0 ) begin
+            write_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS] = latched_write_value[ (i+1)*2*DATA_BITS-1:i*2*DATA_BITS+DATA_BITS ];
+        end else begin
+            if( i<HALF_BURST_LENGTH-1 )
+                write_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS] = write_value[1][(i+2)*DATA_BITS-1:(i+1)*DATA_BITS];
+            else
+                write_value[1][HALF_BURST_LENGTH*DATA_BITS-1:(HALF_BURST_LENGTH-1)*DATA_BITS] = { DATA_BITS{1'bX} };
+        end
+    end
+end
+
+endgenerate
 
 endmodule

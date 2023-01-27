@@ -23,8 +23,8 @@ module sddr_phy_xilinx#(
         input                                           ctl_we_n_i,
         input [ROW_BITS+$clog2(DATA_BITS/8)-1:0]        ctl_addr_i,
         input [BANK_BITS-1:0]                           ctl_ba_i,
-        input [DATA_BITS*2-1:0]                         ctl_dq_i,
-        output [DATA_BITS*2-1:0]                        ctl_dq_o,
+        input [DATA_BITS-1:0]                           ctl_dq_i[1:0],
+        output [DATA_BITS-1:0]                          ctl_dq_o[1:0],
 
         input                                           ctl_data_transfer_i,
         input                                           ctl_data_write_i,
@@ -51,7 +51,7 @@ module sddr_phy_xilinx#(
         inout [DATA_BITS-1:0]                           ddr3_dq_io
     );
 
-assign ddr3_dm_o = { DATA_BITS/8{1'b1} };
+assign ddr3_dm_o = { DATA_BITS/8{1'b0} };
 assign ddr3_reset_n_o = in_ddr_reset_n_i;
 assign ddr3_cs_n_o = ctl_cs_n_i;
 IOBUF odt_buffer( .I(ctl_odt_i), .T(!ddr3_reset_n_o), .IO(ddr3_odt_o), .O() );
@@ -93,7 +93,8 @@ genvar i;
 generate
     for(i=0; i<DATA_BITS/8; i++) begin : dqs_gen
         logic dqs;
-        IOBUFDS dqs_buffer(.IO(ddr3_dqs_p_io[i]), .IOB(ddr3_dqs_n_io[i]), .O(dqs), .I(in_ddr_clock_90deg_i), .T(ctl_data_write_i));
+        IOBUFDS dqs_buffer(
+            .IO(ddr3_dqs_p_io[i]), .IOB(ddr3_dqs_n_io[i]), .O(dqs), .I(in_ddr_clock_90deg_i), .T(!ctl_data_write_i));
     end : dqs_gen
 
     for(i=0; i<DATA_BITS; i++) begin : data_gen
@@ -108,8 +109,8 @@ generate
             .Q(out_data_bit),
             .C(in_ddr_clock_i),
             .CE(ctl_data_transfer_i),
-            .D1(ctl_dq_i[i]),
-            .D2(ctl_dq_i[i+DATA_BITS]),
+            .D1(ctl_dq_i[0][i]),
+            .D2(ctl_dq_i[1][i]),
             .R(1'b0),
             .S(1'b0)
         );
