@@ -28,13 +28,13 @@ module sddr_ctrl#(
         input [BANK_BITS+ROW_BITS+COL_BITS+$clog2(DATA_BITS/8)-1:0]
                                                         data_cmd_address,
         input                                           data_cmd_write,
-        output                                          data_cmd_ack,
+        output logic                                    data_cmd_ack,
         output                                          data_rsp_ready,
         input [BURST_LENGTH*DATA_BITS-1:0]              data_cmd_data_i,
         input [BURST_LENGTH*DATA_BITS-1:0]              data_data_o,
 
         // phy interfaces
-        output                                          ddr3_cke_o,
+        output logic                                    ddr3_cke_o,
         output                                          ddr3_ras_n_o,
         output                                          ddr3_cas_n_o,
         output                                          ddr3_we_n_o,
@@ -74,7 +74,15 @@ assign ddr_phy_reset_n_o        = reset_state[1];
 logic ctrl_reset                = reset_state[2];
 logic bypass                    = !reset_state[3];
 assign ddr3_odt_o               = reset_state[4];
-assign ddr3_cke_o               = reset_state[5];
+//assign ddr3_cke_o               = reset_state[5];
+
+localparam ADDRESS_BITS = BANK_BITS+ROW_BITS+COL_BITS+$clog2(DATA_BITS/8);
+
+logic [BURST_LENGTH*DATA_BITS-1:0] latched_write_value, write_value;
+logic [ADDRESS_BITS-1:0] latched_address;
+enum { STATE_IDLE, STATE_WRITE, STATE_READ } state = STATE_IDLE, prev_state = STATE_IDLE;
+
+assign data_cmd_ack = state==STATE_IDLE && reset_state[3] /* override off */;
 
 // CPU clock domain
 always_ff@(posedge cpu_clock_i) begin
@@ -94,18 +102,51 @@ always_ff@(posedge cpu_clock_i) begin
             end
         endcase
     end
+
+    if( data_cmd_ack && data_cmd_valid ) begin
+        if( data_cmd_write ) begin
+            state <= STATE_WRITE;
+            latched_write_value <= data_cmd_data_i;
+            latched_address <= data_cmd_address;
+        end
+    end
 end
+
+enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP } bank_state = BS_PRECHARGED;
+int bank_state_counter = 0;
 
 // DDR clock domain
 always_ff@(posedge ddr_clock_i) begin
+    prev_state <= state;
+
     if( !reset_state[3] /* override */ && override_cmd_cpu_send ) begin
         ddr3_addr_o <= override_addr;
         ddr3_ba_o <= override_addr[31:31-BANK_BITS+1];
+        ddr3_cke_o <= reset_state[5];
         output_cmd <= override_cmd_cpu; // Remant from the days we had separate CPU and DDR clocks
     end else begin
-        output_cmd <= 5'b0111; // NOP
+        output_cmd <= 4'b0111; // NOP
         ddr3_addr_o <= 0;
         ddr3_ba_o <= 0;
+
+        if( prev_state!=state ) begin
+            if( prev_state==STATE_IDLE ) begin
+                bank_state <= BS_ACTIVATE_ROW;
+            end
+        end
+
+        if( bank_state_counter!=0 )
+            bank_state_counter<=bank_state_counter-1;
+        else begin
+            case( bank_state )
+                BS_ACTIVATE_ROW: begin
+                    output_cmd <= 4'b0011; // Activate
+                    ddr3_ba_o <= latched_address[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
+                    ddr3_addr_o <= latched_address[COL_BITS+ROW_BITS-1:COL_BITS];
+                    bank_state <= BS_OP;
+                end
+            endcase
+        end
     end
 end
 
