@@ -60,12 +60,14 @@ typedef enum {
     RegClCwl,
     RegtRCD,            // Activate to read/write
     RegtRC,             // Activate to Activate or Refresh
-    RegtRP              // PRECHARGE command period
+    RegtRP,             // PRECHARGE command period
+    RegtRFC,            // REFRESH to ACTIVATE
+    RegtREFI            // Time between refreshes
 } RegisterAddresses;
 
 wire ddr_clock_i = cpu_clock_i;
 
-logic [31:0] tRCD, tRC, tRP;
+logic [31:0] tRCD, tRC, tRP, tRFC, tREFI;
 logic [15:0] casReadLatency, casWriteLatency;
 
 logic [31:0] reset_state=0; // State of the reset signals
@@ -95,11 +97,14 @@ localparam HALF_BURST_LENGTH = BURST_LENGTH/2;
 logic [BURST_LENGTH*DATA_BITS-1:0] latched_write_value;
 logic [ADDRESS_BITS-1:0] latched_address;
 logic [HALF_BURST_LENGTH*DATA_BITS-1:0] write_value[1:0];
-enum { STATE_IDLE, STATE_WRITE, STATE_READ } state = STATE_IDLE, prev_state = STATE_IDLE;
+enum { STATE_IDLE, STATE_WRITE, STATE_READ } state = STATE_IDLE;
 
 assign data_cmd_ack = state==STATE_IDLE && reset_state[3] /* override off */;
 assign ddr3_dq_o[0] = write_value[0][DATA_BITS-1:0];
 assign ddr3_dq_o[1] = write_value[1][DATA_BITS-1:0];
+
+enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_WRITE, BS_OP_END } bank_state = BS_PRECHARGED;
+int bank_state_counter = 0, bank_refersh_counter = 0;
 
 // CPU clock domain
 always_ff@(posedge cpu_clock_i) begin
@@ -132,6 +137,12 @@ always_ff@(posedge cpu_clock_i) begin
             RegtRP: begin
                 tRP <= ctrl_cmd_data;
             end
+            RegtRFC: begin
+                tRFC <= ctrl_cmd_data;
+            end
+            RegtREFI: begin
+                tREFI <= ctrl_cmd_data;
+            end
         endcase
     end
 
@@ -141,36 +152,41 @@ always_ff@(posedge cpu_clock_i) begin
             latched_write_value <= data_cmd_data_i;
             latched_address <= data_cmd_address;
         end
-    end
+    end else if( bank_state==BS_PRECHARGED )
+        state <= STATE_IDLE;
 end
-
-enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_WRITE, BS_OP_END } bank_state = BS_PRECHARGED;
-int bank_state_counter = 0;
 
 // DDR clock domain
 always_ff@(posedge ddr_clock_i) begin
-    prev_state <= state;
-
     if( !reset_state[3] /* override */ && override_cmd_cpu_send ) begin
         ddr3_addr_o <= override_addr;
         ddr3_ba_o <= override_addr[31:31-BANK_BITS+1];
         ddr3_cke_o <= reset_state[5];
         output_cmd <= override_cmd_cpu; // Remant from the days we had separate CPU and DDR clocks
+
+        bank_refersh_counter <= tREFI;
     end else begin
         output_cmd <= 4'b0111; // NOP
         ddr3_addr_o <= 0;
         ddr3_ba_o <= 0;
 
-        if( prev_state!=state ) begin
-            if( prev_state==STATE_IDLE ) begin
-                bank_state <= BS_ACTIVATE_ROW;
-            end
-        end
+        if( bank_refersh_counter!=0 )
+            bank_refersh_counter <= bank_refersh_counter-1;
 
         if( bank_state_counter!=0 )
             bank_state_counter<=bank_state_counter-1;
         else begin
             case( bank_state )
+                BS_PRECHARGED: begin
+                    if( bank_refersh_counter==0 ) begin
+                        bank_refersh_counter <= tREFI;
+                        bank_state <= BS_PRECHARGED;
+                        bank_state_counter <= tRFC;
+
+                        output_cmd <= 5'b0001;  // Refresh
+                    end else if( state!=STATE_IDLE )
+                        bank_state <= BS_ACTIVATE_ROW;
+                end
                 BS_ACTIVATE_ROW: begin
                     output_cmd <= 4'b0011; // Activate
                     ddr3_ba_o <= latched_address[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
@@ -198,7 +214,7 @@ always_ff@(posedge ddr_clock_i) begin
                     ddr3_addr_o[10] = 1'b1;       // Auto precharge
                 end
                 BS_WRITE: begin
-                    bank_state_counter <= BURST_LENGTH-1;
+                    bank_state_counter <= HALF_BURST_LENGTH-1;
                     bank_state <= BS_OP_END;
                 end
                 BS_OP_END: begin
