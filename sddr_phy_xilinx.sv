@@ -118,8 +118,8 @@ generate
             .C(dqs_gen[i/8].dqs),
             .CE(1'b1),
             .D(in_data_bit),
-            .Q1(ctl_dq_o[i]),
-            .Q2(ctl_dq_o[i+DATA_BITS]),
+            .Q1(ctl_dq_o[0][i]),
+            .Q2(ctl_dq_o[1][i]),
             .R(1'b0),
             .S(1'b0)
         );

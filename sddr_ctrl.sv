@@ -29,9 +29,9 @@ module sddr_ctrl#(
                                                         data_cmd_address,
         input                                           data_cmd_write,
         output logic                                    data_cmd_ack,
-        output                                          data_rsp_ready,
+        output logic                                    data_rsp_ready,
         input [BURST_LENGTH*DATA_BITS-1:0]              data_cmd_data_i,
-        input [BURST_LENGTH*DATA_BITS-1:0]              data_data_o,
+        output [BURST_LENGTH*DATA_BITS-1:0]             data_data_o,
 
         // phy interfaces
         output logic                                    ddr3_cke_o,
@@ -96,12 +96,12 @@ localparam HALF_BURST_LENGTH = BURST_LENGTH/2;
 
 logic [BURST_LENGTH*DATA_BITS-1:0] latched_write_value;
 logic [ADDRESS_BITS-1:0] latched_address;
-logic [HALF_BURST_LENGTH*DATA_BITS-1:0] write_value[1:0];
+logic [HALF_BURST_LENGTH*DATA_BITS-1:0] shift_value[1:0];
 enum { STATE_IDLE, STATE_WRITE, STATE_READ } state = STATE_IDLE;
 
 assign data_cmd_ack = state==STATE_IDLE && reset_state[3] /* override off */;
-assign ddr3_dq_o[0] = write_value[0][DATA_BITS-1:0];
-assign ddr3_dq_o[1] = write_value[1][DATA_BITS-1:0];
+assign ddr3_dq_o[0] = shift_value[0][DATA_BITS-1:0];
+assign ddr3_dq_o[1] = shift_value[1][DATA_BITS-1:0];
 
 enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_WRITE, BS_OP_END } bank_state = BS_PRECHARGED;
 int bank_state_counter = 0, bank_refersh_counter = 0;
@@ -150,14 +150,18 @@ always_ff@(posedge cpu_clock_i) begin
         if( data_cmd_write ) begin
             state <= STATE_WRITE;
             latched_write_value <= data_cmd_data_i;
-            latched_address <= data_cmd_address;
+        end else begin
+            state <= STATE_READ;
         end
-    end else if( bank_state==BS_PRECHARGED )
+        latched_address <= data_cmd_address;
+    end else if( bank_state==BS_OP_END && bank_state_counter==0 )
         state <= STATE_IDLE;
 end
 
 // DDR clock domain
 always_ff@(posedge ddr_clock_i) begin
+    data_rsp_ready <= 1'b0;
+
     if( !reset_state[3] /* override */ && override_cmd_cpu_send ) begin
         ddr3_addr_o <= override_addr;
         ddr3_ba_o <= override_addr[31:31-BANK_BITS+1];
@@ -217,12 +221,18 @@ always_ff@(posedge ddr_clock_i) begin
                     bank_state_counter <= HALF_BURST_LENGTH-1;
                     bank_state <= BS_OP_END;
                 end
+                BS_READ: begin
+                    bank_state_counter <= HALF_BURST_LENGTH-1;
+                    bank_state <= BS_OP_END;
+                end
                 BS_OP_END: begin
                     data_transfer_o <= 1'b0;
                     data_write_o <= 1'b0;
 
                     bank_state <= BS_PRECHARGED;
                     bank_state_counter <= tRP;
+
+                    data_rsp_ready <= 1;
                 end
             endcase
         end
@@ -233,28 +243,31 @@ end
 genvar i;
 generate
 
-for( i=0; i<HALF_BURST_LENGTH; i++ ) begin : write_value_gen
+for( i=0; i<HALF_BURST_LENGTH; i++ ) begin : shift_value_gen
     always_ff@(negedge ddr_clock_i) begin
         if( bank_state==BS_WRITE && bank_state_counter==0 ) begin
-            write_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] = latched_write_value[ i*2*DATA_BITS+DATA_BITS-1:i*2*DATA_BITS ];
+            shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] = latched_write_value[ i*2*DATA_BITS+DATA_BITS-1:i*2*DATA_BITS ];
         end else begin
             if( i<HALF_BURST_LENGTH-1 )
-                write_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] = write_value[0][(i+2)*DATA_BITS-1:(i+1)*DATA_BITS];
+                shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] = shift_value[0][(i+2)*DATA_BITS-1:(i+1)*DATA_BITS];
             else
-                write_value[0][HALF_BURST_LENGTH*DATA_BITS-1:(HALF_BURST_LENGTH-1)*DATA_BITS] = { DATA_BITS{1'bX} };
+                shift_value[0][HALF_BURST_LENGTH*DATA_BITS-1:(HALF_BURST_LENGTH-1)*DATA_BITS] = ddr3_dq_i[0];
         end
     end
 
     always_ff@(posedge ddr_clock_i) begin
         if( bank_state==BS_WRITE && bank_state_counter==0 ) begin
-            write_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS] = latched_write_value[ (i+1)*2*DATA_BITS-1:i*2*DATA_BITS+DATA_BITS ];
+            shift_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS] = latched_write_value[ (i+1)*2*DATA_BITS-1:i*2*DATA_BITS+DATA_BITS ];
         end else begin
             if( i<HALF_BURST_LENGTH-1 )
-                write_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS] = write_value[1][(i+2)*DATA_BITS-1:(i+1)*DATA_BITS];
+                shift_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS] = shift_value[1][(i+2)*DATA_BITS-1:(i+1)*DATA_BITS];
             else
-                write_value[1][HALF_BURST_LENGTH*DATA_BITS-1:(HALF_BURST_LENGTH-1)*DATA_BITS] = { DATA_BITS{1'bX} };
+                shift_value[1][HALF_BURST_LENGTH*DATA_BITS-1:(HALF_BURST_LENGTH-1)*DATA_BITS] = ddr3_dq_i[1];
         end
     end
+
+    assign data_data_o[ i*2*DATA_BITS+DATA_BITS-1:i*2*DATA_BITS ] = shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS];
+    assign data_data_o[ (i+1)*2*DATA_BITS-1:i*2*DATA_BITS+DATA_BITS ] = shift_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS];
 end
 
 endgenerate
