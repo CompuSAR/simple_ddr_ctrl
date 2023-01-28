@@ -105,7 +105,7 @@ generate
             .O(in_data_bit),
             .T(!ctl_data_write_i)
         );
-        ODDR#(.DDR_CLK_EDGE("SAME_EDGE")) data_out_ddr(
+        ODDR#(.DDR_CLK_EDGE("OPPOSITE_EDGE")) data_out_ddr(
             .Q(out_data_bit),
             .C(in_ddr_clock_i),
             .CE(ctl_data_transfer_i),

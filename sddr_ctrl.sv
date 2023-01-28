@@ -49,7 +49,7 @@ module sddr_ctrl#(
         output [DATA_BITS-1:0]                          ddr3_dq_o[1:0],
         input [DATA_BITS-1:0]                           ddr3_dq_i[1:0],
 
-        output                                          data_transfer_o,
+        output logic                                    data_transfer_o,
         output logic                                    data_write_o
     );
 
@@ -179,6 +179,7 @@ always_ff@(posedge ddr_clock_i) begin
                     bank_state_counter <= tRCD;
                 end
                 BS_OP: begin
+                    data_transfer_o <= 1'b1;
                     if( state==STATE_READ ) begin
                         output_cmd <= 4'b0101;  // Read
                         bank_state <= BS_READ;
@@ -187,6 +188,7 @@ always_ff@(posedge ddr_clock_i) begin
                         output_cmd <= 4'b0100;  // Write
                         bank_state <= BS_WRITE;
                         bank_state_counter <= casWriteLatency;
+                        data_write_o <= 1'b1;
                     end
                     ddr3_ba_o <= latched_address[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
                     ddr3_addr_o <= 0;
@@ -196,11 +198,11 @@ always_ff@(posedge ddr_clock_i) begin
                     ddr3_addr_o[10] = 1'b1;       // Auto precharge
                 end
                 BS_WRITE: begin
-                    data_write_o <= 1'b1;
                     bank_state_counter <= BURST_LENGTH-1;
                     bank_state <= BS_OP_END;
                 end
                 BS_OP_END: begin
+                    data_transfer_o <= 1'b0;
                     data_write_o <= 1'b0;
 
                     bank_state <= BS_PRECHARGED;
@@ -216,7 +218,7 @@ genvar i;
 generate
 
 for( i=0; i<HALF_BURST_LENGTH; i++ ) begin : write_value_gen
-    always_ff@(posedge ddr_clock_i) begin
+    always_ff@(negedge ddr_clock_i) begin
         if( bank_state==BS_WRITE && bank_state_counter==0 ) begin
             write_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] = latched_write_value[ i*2*DATA_BITS+DATA_BITS-1:i*2*DATA_BITS ];
         end else begin
@@ -227,7 +229,7 @@ for( i=0; i<HALF_BURST_LENGTH; i++ ) begin : write_value_gen
         end
     end
 
-    always_ff@(negedge ddr_clock_i) begin
+    always_ff@(posedge ddr_clock_i) begin
         if( bank_state==BS_WRITE && bank_state_counter==0 ) begin
             write_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS] = latched_write_value[ (i+1)*2*DATA_BITS-1:i*2*DATA_BITS+DATA_BITS ];
         end else begin
