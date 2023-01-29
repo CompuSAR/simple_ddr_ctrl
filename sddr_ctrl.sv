@@ -58,6 +58,7 @@ typedef enum {
     RegOverrideCmd,
     RegOverrideAddr,
     RegClCwl,
+    RegWriteRecovery,
     RegtRCD,            // Activate to read/write
     RegtRC,             // Activate to Activate or Refresh
     RegtRP,             // PRECHARGE command period
@@ -69,6 +70,7 @@ wire ddr_clock_i = cpu_clock_i;
 
 logic [31:0] tRCD, tRC, tRP, tRFC, tREFI;
 logic [15:0] casReadLatency, casWriteLatency;
+logic [31:0] write_recovery;
 
 logic [31:0] reset_state=0; // State of the reset signals
 
@@ -127,6 +129,9 @@ always_ff@(posedge cpu_clock_i) begin
             RegClCwl: begin
                 casReadLatency <= ctrl_cmd_data[15:0];
                 casWriteLatency <= ctrl_cmd_data[31:16];
+            end
+            RegWriteRecovery: begin
+                write_recovery <= ctrl_cmd_data;
             end
             RegtRCD: begin
                 tRCD <= ctrl_cmd_data;
@@ -230,7 +235,7 @@ always_ff@(posedge ddr_clock_i) begin
                     data_write_o <= 1'b0;
 
                     bank_state <= BS_PRECHARGED;
-                    bank_state_counter <= tRP;
+                    bank_state_counter <= tRP + (state==STATE_WRITE) ? write_recovery : 0;
 
                     data_rsp_ready <= 1;
                 end
