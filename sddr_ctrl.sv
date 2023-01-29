@@ -19,7 +19,7 @@ module sddr_ctrl#(
         input  [15:0]                                   ctrl_cmd_address,
         input  [31:0]                                   ctrl_cmd_data,
         input                                           ctrl_cmd_write,
-        output                                          ctrl_cmd_ack,
+        output logic                                    ctrl_cmd_ack,
         output                                          ctrl_rsp_ready,
         output [31:0]                                   ctrl_rsp_data,
 
@@ -52,19 +52,6 @@ module sddr_ctrl#(
         output logic                                    data_transfer_o,
         output logic                                    data_write_o
     );
-
-typedef enum {
-    RegResetState = 0,
-    RegOverrideCmd,
-    RegOverrideAddr,
-    RegClCwl,
-    RegWriteRecovery,
-    RegtRCD,            // Activate to read/write
-    RegtRC,             // Activate to Activate or Refresh
-    RegtRP,             // PRECHARGE command period
-    RegtRFC,            // REFRESH to ACTIVATE
-    RegtREFI            // Time between refreshes
-} RegisterAddresses;
 
 wire ddr_clock_i = cpu_clock_i;
 
@@ -106,46 +93,44 @@ assign ddr3_dq_o[0] = shift_value[0][DATA_BITS-1:0];
 assign ddr3_dq_o[1] = shift_value[1][DATA_BITS-1:0];
 
 enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_WRITE, BS_OP_END } bank_state = BS_PRECHARGED;
-int bank_state_counter = 0, bank_refersh_counter = 0;
+reg[31:0] bank_state_counter = 0, bank_refersh_counter = 0;
 
 // CPU clock domain
 always_ff@(posedge cpu_clock_i) begin
     override_cmd_cpu_send <= 1'b0;
 
     if( ctrl_cmd_valid && ctrl_cmd_ack && ctrl_cmd_write ) begin
-        RegisterAddresses command;
-        $cast(command, ctrl_cmd_address[15:2]);
-        case(command)
-            RegResetState: begin
+        case(ctrl_cmd_address[15:0])
+            16'h0000: begin                             // Reset state
                 reset_state <= ctrl_cmd_data;
             end
-            RegOverrideCmd: begin
+            16'h0004: begin                             // Override command
                 override_cmd_cpu <= ctrl_cmd_data;
                 override_cmd_cpu_send <= 1'b1;
             end
-            RegOverrideAddr: begin
+            16'h0008: begin                             // Override address
                 override_addr <= ctrl_cmd_data;
             end
-            RegClCwl: begin
+            16'h000c: begin                             // CL and CWL
                 casReadLatency <= ctrl_cmd_data[15:0];
                 casWriteLatency <= ctrl_cmd_data[31:16];
             end
-            RegWriteRecovery: begin
+            16'h0010: begin                             // Write recovery
                 write_recovery <= ctrl_cmd_data;
             end
-            RegtRCD: begin
+            16'h0014: begin                             // tRCD
                 tRCD <= ctrl_cmd_data;
             end
-            RegtRC: begin
+            16'h0018: begin                             // tRC
                 tRC <= ctrl_cmd_data;
             end
-            RegtRP: begin
+            16'h001c: begin                             // tRP
                 tRP <= ctrl_cmd_data;
             end
-            RegtRFC: begin
+            16'h0020: begin                             // tRFC
                 tRFC <= ctrl_cmd_data;
             end
-            RegtREFI: begin
+            16'h0024: begin                             // tREFI
                 tREFI <= ctrl_cmd_data;
             end
         endcase
