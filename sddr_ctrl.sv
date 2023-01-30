@@ -204,8 +204,8 @@ always_ff@(posedge ddr_clock_i) begin
                     ddr3_addr_o <= 0;
                     ddr3_addr_o[9:0] <= latched_address[$clog2(DATA_BITS/8)+COL_BITS-1:$clog2(DATA_BITS/8)];
                     if( COL_BITS>10 )
-                        ddr3_addr_o[11] = latched_address[$clog2(DATA_BITS/8)+10];
-                    ddr3_addr_o[10] = 1'b1;       // Auto precharge
+                        ddr3_addr_o[11] <= latched_address[$clog2(DATA_BITS/8)+10];
+                    ddr3_addr_o[10] <= 1'b1;       // Auto precharge
                 end
                 BS_WRITE: begin
                     bank_state_counter <= HALF_BURST_LENGTH-1;
