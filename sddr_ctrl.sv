@@ -93,7 +93,7 @@ assign ddr3_dq_o[0] = shift_value[0][DATA_BITS-1:0];
 assign ddr3_dq_o[1] = shift_value[1][DATA_BITS-1:0];
 
 enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_WRITE, BS_OP_END } bank_state = BS_PRECHARGED;
-reg[31:0] bank_state_counter = 0, bank_refersh_counter = 0;
+reg[31:0] bank_state_counter = 0, bank_refersh_counter = 1;
 
 // CPU clock domain
 always_ff@(posedge cpu_clock_i) begin
