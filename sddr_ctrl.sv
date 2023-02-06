@@ -10,7 +10,7 @@ module sddr_ctrl#(
     (
         // Control lines
         input cpu_clock_i,
-        //input ddr_clock_i,
+        input ddr_clock_i,
         output ddr_reset_n_o,
         output ddr_phy_reset_n_o,
 
@@ -52,8 +52,6 @@ module sddr_ctrl#(
         output logic                                    data_transfer_o,
         output logic                                    data_write_o
     );
-
-wire ddr_clock_i = cpu_clock_i;
 
 logic [31:0] tRCD, tRC, tRP, tRFC, tREFI;
 logic [15:0] casReadLatency, casWriteLatency;
