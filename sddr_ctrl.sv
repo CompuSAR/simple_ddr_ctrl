@@ -5,7 +5,16 @@ module sddr_ctrl#(
         ROW_BITS = 13,
         COL_BITS = 10,
         DATA_BITS = 16,
-        BURST_LENGTH = 8
+        BURST_LENGTH = 8,
+
+        tRCD = 0,               // ACTIVATE to READ/WRITE
+        tRC = 0,                // ACTIVATE to REFRESH
+        tRP = 0,                // PRECHARGE period
+        tRFC = 0,               // REFRESH to ACTIVATE
+        tREFI = 0,              // Maximum average periodic refresh
+        casReadLatency = 5,
+        casWriteLatency = 5,
+        write_recovery = 5
     )
     (
         // Control lines
@@ -53,30 +62,28 @@ module sddr_ctrl#(
         output logic                                    data_write_o
     );
 
-logic [31:0] tRCD, tRC, tRP, tRFC, tREFI;
-logic [15:0] casReadLatency, casWriteLatency;
-logic [31:0] write_recovery;
-
-logic [31:0] reset_state=0; // State of the reset signals
+logic [31:0] reset_state_cpu=0, reset_state_ddr; // State of the reset signals
+xpm_cdc_array_single#(.SRC_INPUT_REG(0), .WIDTH(32))
+reset_state_cdc(.src_clk(cpu_clock_i), .dest_clk(ddr_clock_i), .src_in(reset_state_cpu), .dest_out(reset_state_ddr));
 
 // Bits: CS, RAS, CAS, WE.
-logic [3:0] override_cmd_cpu, output_cmd;
-logic override_cmd_cpu_send = 1'b0;
-logic [31:0] override_addr;
+logic [3:0] override_cmd_cpu, override_cmd_ddr, output_cmd;
+logic override_cmd_cpu_send = 1'b0, override_cmd_ddr_ready, override_cmd_cpu_received;
+logic [31:0] override_addr_cpu, override_addr_ddr;
 
 assign ddr3_we_n_o = output_cmd[0];
 assign ddr3_cas_n_o = output_cmd[1];
 assign ddr3_ras_n_o = output_cmd[2];
 assign ddr3_cs_n_o = output_cmd[3];
 
-assign ctrl_cmd_ack = 1'b1;
+assign ctrl_cmd_ack = !override_cmd_cpu_received && !override_cmd_cpu_send;
 
-assign ddr_reset_n_o            = reset_state[0];
-assign ddr_phy_reset_n_o        = reset_state[1];
-logic ctrl_reset                = reset_state[2];
-logic bypass                    = !reset_state[3];
-assign ddr3_odt_o               = reset_state[4];
-//assign ddr3_cke_o               = reset_state[5];
+assign ddr_reset_n_o            = reset_state_ddr[0];
+assign ddr_phy_reset_n_o        = reset_state_ddr[1];
+logic ctrl_reset                = reset_state_cpu[2];
+logic bypass                    = !reset_state_ddr[3];
+assign ddr3_odt_o               = reset_state_ddr[4];
+//assign ddr3_cke_o               = reset_state_ddr[5];
 
 localparam ADDRESS_BITS = BANK_BITS+ROW_BITS+COL_BITS+$clog2(DATA_BITS/8);
 localparam HALF_BURST_LENGTH = BURST_LENGTH/2;
@@ -86,50 +93,48 @@ logic [ADDRESS_BITS-1:0] latched_address;
 logic [HALF_BURST_LENGTH*DATA_BITS-1:0] shift_value[1:0];
 enum { STATE_IDLE, STATE_WRITE, STATE_READ } state = STATE_IDLE;
 
-assign data_cmd_ack = state==STATE_IDLE && reset_state[3] /* override off */;
+assign data_cmd_ack = state==STATE_IDLE && reset_state_cpu[3]; // Override off
 assign ddr3_dq_o[0] = shift_value[0][DATA_BITS-1:0];
 assign ddr3_dq_o[1] = shift_value[1][DATA_BITS-1:0];
 
 enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_WRITE, BS_OP_END } bank_state = BS_PRECHARGED;
 reg[31:0] bank_state_counter = 0, bank_refersh_counter = 1;
 
+xpm_cdc_handshake#(
+    .DEST_EXT_HSK(0),
+    .WIDTH(32+4),
+    .SRC_SYNC_FF(2),
+    .DEST_SYNC_FF(3)
+) override_cmd_cdc(
+    .dest_clk(ddr_clock_i),
+    .dest_ack(),
+    .dest_out( {override_cmd_ddr, override_addr_ddr} ),
+    .dest_req(override_cmd_ddr_ready),
+
+    .src_clk(cpu_clock_i),
+    .src_in( {override_cmd_cpu, override_addr_cpu} ),
+    .src_rcv(override_cmd_cpu_received),
+    .src_send(override_cmd_cpu_send)
+);
+
 // CPU clock domain
 always_ff@(posedge cpu_clock_i) begin
-    override_cmd_cpu_send <= 1'b0;
+    if( override_cmd_cpu_send && !override_cmd_cpu_received )
+        override_cmd_cpu_send <= 1'b1;
+    else
+        override_cmd_cpu_send <= 1'b0;
 
     if( ctrl_cmd_valid && ctrl_cmd_ack && ctrl_cmd_write ) begin
         case(ctrl_cmd_address[15:0])
             16'h0000: begin                             // Reset state
-                reset_state <= ctrl_cmd_data;
+                reset_state_cpu <= ctrl_cmd_data;
             end
             16'h0004: begin                             // Override command
                 override_cmd_cpu <= ctrl_cmd_data;
                 override_cmd_cpu_send <= 1'b1;
             end
             16'h0008: begin                             // Override address
-                override_addr <= ctrl_cmd_data;
-            end
-            16'h000c: begin                             // CL and CWL
-                casReadLatency <= ctrl_cmd_data[15:0];
-                casWriteLatency <= ctrl_cmd_data[31:16];
-            end
-            16'h0010: begin                             // Write recovery
-                write_recovery <= ctrl_cmd_data;
-            end
-            16'h0014: begin                             // tRCD
-                tRCD <= ctrl_cmd_data;
-            end
-            16'h0018: begin                             // tRC
-                tRC <= ctrl_cmd_data;
-            end
-            16'h001c: begin                             // tRP
-                tRP <= ctrl_cmd_data;
-            end
-            16'h0020: begin                             // tRFC
-                tRFC <= ctrl_cmd_data;
-            end
-            16'h0024: begin                             // tREFI
-                tREFI <= ctrl_cmd_data;
+                override_addr_cpu <= ctrl_cmd_data;
             end
         endcase
     end
@@ -150,11 +155,11 @@ end
 always_ff@(posedge ddr_clock_i) begin
     data_rsp_ready <= 1'b0;
 
-    if( !reset_state[3] /* override */ && override_cmd_cpu_send ) begin
-        ddr3_addr_o <= override_addr;
-        ddr3_ba_o <= override_addr[31:31-BANK_BITS+1];
-        ddr3_cke_o <= reset_state[5];
-        output_cmd <= override_cmd_cpu; // Remant from the days we had separate CPU and DDR clocks
+    if( bypass && override_cmd_ddr_ready ) begin
+        ddr3_addr_o <= override_addr_ddr;
+        ddr3_ba_o <= override_addr_ddr[31:31-BANK_BITS+1];
+        ddr3_cke_o <= reset_state_ddr[5];
+        output_cmd <= override_cmd_ddr;
 
         bank_refersh_counter <= tREFI;
     end else begin
