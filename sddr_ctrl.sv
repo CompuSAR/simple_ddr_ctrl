@@ -91,7 +91,6 @@ assign ddr3_odt_o               = reset_state_ddr[4];
 
 logic [BURST_LENGTH*DATA_BITS-1:0] latched_write_data;
 logic [HALF_BURST_LENGTH*DATA_BITS-1:0] shift_value[1:0];
-enum { STATE_IDLE, STATE_WRITE, STATE_READ } state = STATE_IDLE;
 
 assign ddr3_dq_o[0] = shift_value[0][DATA_BITS-1:0];
 assign ddr3_dq_o[1] = shift_value[1][DATA_BITS-1:0];
@@ -119,29 +118,20 @@ xpm_cdc_handshake#(
 logic[ADDRESS_BITS-1:0] data_cmd_address_ddr;
 logic[CMD_DATA_BITS-1:0] data_cmd_data_ddr;
 logic data_cmd_write_ddr;
-logic data_cmd_valid_cpu=1'b0, data_cmd_valid_ddr;
-logic data_cmd_ready_cpu, data_cmd_ack_cpu, data_cmd_ready_ddr = 1'b1;
+logic data_cmd_valid_cpu=1'b0, data_cmd_valid_ddr, data_cmd_ack_ddr=1'b0;
+logic data_cmd_ack_cpu;
+logic data_rsp_ready_ddr = 1'b0;
 
-assign data_cmd_ack = !data_cmd_valid_cpu && data_cmd_ready_cpu && reset_state_cpu[3]; // Override off
-
-xpm_cdc_single#(
-    .SRC_INPUT_REG(0),
-    .DEST_SYNC_FF(2)
-) data_cmd_ack_cdc(
-    .src_clk(ddr_clock_i),
-    .dest_clk(cpu_clock_i),
-    .src_in(data_cmd_ready_ddr),
-    .dest_out(data_cmd_ready_cpu)
-);
+assign data_cmd_ack = !data_cmd_valid_cpu && !data_cmd_ack_cpu && reset_state_cpu[3]; // Override off
 
 xpm_cdc_handshake#(
-    .DEST_EXT_HSK(0),
+    .DEST_EXT_HSK(1),
     .WIDTH( ADDRESS_BITS + 1 /* Write */ + CMD_DATA_BITS ),
     .SRC_SYNC_FF(2),
     .DEST_SYNC_FF(3)
 ) data_cmd_cdc(
     .dest_clk(ddr_clock_i),
-    .dest_ack(),
+    .dest_ack( data_cmd_ack_ddr ),
     .dest_out( {data_cmd_address_ddr, data_cmd_write_ddr, data_cmd_data_ddr} ),
     .dest_req( data_cmd_valid_ddr ),
 
@@ -149,6 +139,16 @@ xpm_cdc_handshake#(
     .src_in( {data_cmd_address, data_cmd_write, data_cmd_data_i} ),
     .src_rcv( data_cmd_ack_cpu ),
     .src_send( data_cmd_valid_cpu || (data_cmd_valid && data_cmd_ack) )
+);
+
+xpm_cdc_single#(
+    .SRC_INPUT_REG(0),
+    .DEST_SYNC_FF(2)
+) data_rsp_ready_cdc(
+    .src_clk(ddr_clock_i),
+    .dest_clk(cpu_clock_i),
+    .src_in(data_rsp_ready_ddr),
+    .dest_out(data_rsp_ready)
 );
 
 // CPU clock domain
@@ -174,25 +174,16 @@ always_ff@(posedge cpu_clock_i) begin
     end
 
     if( data_cmd_ack && data_cmd_valid ) begin
-        if( data_cmd_write ) begin
-            state <= STATE_WRITE;
-        end else begin
-            state <= STATE_READ;
-        end
         data_cmd_valid_cpu <= 1'b1;
     end
     if( data_cmd_valid_cpu && data_cmd_ack_cpu ) begin
-        state <= STATE_IDLE;
         data_cmd_valid_cpu <= 1'b0;
     end
 end
 
 // DDR clock domain
 always_ff@(posedge ddr_clock_i) begin
-    if( data_cmd_valid_ddr ) begin
-        latched_write_data <= data_cmd_data_ddr;
-    end
-    data_rsp_ready <= 1'b0;
+    data_rsp_ready_ddr <= 1'b0;
 
     if( bypass && override_cmd_ddr_ready ) begin
         ddr3_addr_o <= override_addr_ddr;
@@ -205,6 +196,13 @@ always_ff@(posedge ddr_clock_i) begin
         output_cmd <= 4'b0111; // NOP
         ddr3_addr_o <= 0;
         ddr3_ba_o <= 0;
+
+        if( !data_cmd_valid_ddr ) begin
+            // Reset the ACK if we're past the state where we no longer need
+            // the latches in the CDC
+            if( bank_state!=BS_PRECHARGED && bank_state!=BS_ACTIVATE_ROW )
+                data_cmd_ack_ddr<=1'b0;
+        end
 
         if( bank_refersh_counter!=0 )
             bank_refersh_counter <= bank_refersh_counter-1;
@@ -220,8 +218,11 @@ always_ff@(posedge ddr_clock_i) begin
                         bank_state_counter <= tRFC;
 
                         output_cmd <= 5'b0001;  // Refresh
-                    end else if( data_cmd_valid_ddr )
+                    end else if( data_cmd_valid_ddr && !data_cmd_ack_ddr ) begin
                         bank_state <= BS_ACTIVATE_ROW;
+                        latched_write_data <= data_cmd_data_ddr;
+                        data_cmd_ack_ddr <= 1'b1;
+                    end
                 end
                 BS_ACTIVATE_ROW: begin
                     output_cmd <= 4'b0011; // Activate
@@ -264,7 +265,7 @@ always_ff@(posedge ddr_clock_i) begin
                     bank_state <= BS_PRECHARGED;
                     bank_state_counter <= tRP + data_cmd_write_ddr ? write_recovery : 0;
 
-                    data_rsp_ready <= 1;
+                    data_rsp_ready_ddr <= 1;
                 end
             endcase
         end

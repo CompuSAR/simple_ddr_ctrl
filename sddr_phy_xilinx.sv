@@ -114,7 +114,7 @@ generate
             .R(1'b0),
             .S(1'b0)
         );
-        IDDR#(.DDR_CLK_EDGE("SAME_EDGE_PIPELINED")) data_in_ddr(
+        IDDR#(.DDR_CLK_EDGE("OPPOSITE_EDGE")) data_in_ddr(
             .C(in_ddr_clock_90deg_i),
             .CE(1'b1),
             .D(in_data_bit),
