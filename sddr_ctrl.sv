@@ -96,7 +96,9 @@ assign ddr3_dq_o[0] = shift_value[0][DATA_BITS-1:0];
 assign ddr3_dq_o[1] = shift_value[1][DATA_BITS-1:0];
 
 enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_READ_END, BS_WRITE, BS_WRITE_END } bank_state = BS_PRECHARGED;
-reg[31:0] bank_state_counter = 0, bank_refersh_counter = 1;
+reg[16:0] bank_state_counter = 0;
+reg[$clog2(tREFI)-1:0] bank_refresh_counter = 1;
+logic bank_state_counter_zero = 1'b0, bank_refresh_counter_zero = 1'b0;
 
 xpm_cdc_handshake#(
     .DEST_EXT_HSK(0),
@@ -195,8 +197,6 @@ always_ff@(posedge ddr_clock_i) begin
         ddr3_ba_o <= override_addr_ddr[31:31-BANK_BITS+1];
         ddr3_cke_o <= reset_state_ddr[5];
         output_cmd <= override_cmd_ddr;
-
-        bank_refersh_counter <= tREFI;
     end else begin
         output_cmd <= 4'b0111; // NOP
         ddr3_addr_o <= 0;
@@ -209,18 +209,24 @@ always_ff@(posedge ddr_clock_i) begin
                 data_cmd_ack_ddr<=1'b0;
         end
 
-        if( bank_refersh_counter!=0 )
-            bank_refersh_counter <= bank_refersh_counter-1;
+        if( !bank_refresh_counter_zero ) begin
+            bank_refresh_counter <= bank_refresh_counter-1;
+            bank_refresh_counter_zero <= bank_refresh_counter==1;
+        end
 
-        if( bank_state_counter!=0 )
+        if( !bank_state_counter_zero ) begin
             bank_state_counter<=bank_state_counter-1;
-        else begin
+            bank_state_counter_zero <= bank_state_counter==1;
+        end else begin
             case( bank_state )
                 BS_PRECHARGED: begin
-                    if( bank_refersh_counter==0 ) begin
-                        bank_refersh_counter <= tREFI;
+                    if( bank_refresh_counter_zero ) begin
+                        bank_refresh_counter <= tREFI;
+                        bank_refresh_counter_zero <= 1'b0;
+
                         bank_state <= BS_PRECHARGED;
                         bank_state_counter <= tRFC;
+                        bank_state_counter_zero <= 1'b0;
 
                         output_cmd <= 5'b0001;  // Refresh
                     end else if( data_cmd_valid_ddr && !data_cmd_ack_ddr ) begin
@@ -238,6 +244,7 @@ always_ff@(posedge ddr_clock_i) begin
                     current_op_write <= data_cmd_write_ddr;
                     bank_state <= BS_OP;
                     bank_state_counter <= tRCD;
+                    bank_state_counter_zero <= 1'b0;
                 end
                 BS_OP: begin
                     data_transfer_o <= 1'b1;
@@ -245,10 +252,12 @@ always_ff@(posedge ddr_clock_i) begin
                         output_cmd <= 4'b0101;  // Read
                         bank_state <= BS_READ;
                         bank_state_counter <= casReadLatency;
+                        bank_state_counter_zero <= 1'b0;
                     end else begin
                         output_cmd <= 4'b0100;  // Write
                         bank_state <= BS_WRITE;
                         bank_state_counter <= casWriteLatency;
+                        bank_state_counter_zero <= 1'b0;
                         data_write_o <= 1'b1;
                     end
                     ddr3_ba_o <= data_cmd_address_ddr[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
@@ -260,10 +269,12 @@ always_ff@(posedge ddr_clock_i) begin
                 end
                 BS_WRITE: begin
                     bank_state_counter <= HALF_BURST_LENGTH-1;
+                    bank_state_counter_zero <= 1'b0;
                     bank_state <= BS_WRITE_END;
                 end
                 BS_READ: begin
                     bank_state_counter <= HALF_BURST_LENGTH-1;
+                    bank_state_counter_zero <= 1'b0;
                     bank_state <= BS_READ_END;
                 end
                 BS_WRITE_END: begin
@@ -272,6 +283,7 @@ always_ff@(posedge ddr_clock_i) begin
 
                     bank_state <= BS_PRECHARGED;
                     bank_state_counter <= tRP + write_recovery;
+                    bank_state_counter_zero <= 1'b0;
                 end
                 BS_READ_END: begin
                     data_transfer_o <= 1'b0;
@@ -279,6 +291,7 @@ always_ff@(posedge ddr_clock_i) begin
 
                     bank_state <= BS_PRECHARGED;
                     bank_state_counter <= tRP;
+                    bank_state_counter_zero <= 1'b0;
 
                     data_rsp_ready_ddr <= 1;
                 end
@@ -293,7 +306,7 @@ generate
 
 for( i=0; i<HALF_BURST_LENGTH; i++ ) begin : shift_value_gen
     always_ff@(negedge ddr_clock_i) begin
-        if( current_op_write && bank_state_counter==0 ) begin
+        if( current_op_write && bank_state_counter_zero ) begin
             shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] <= latched_write_data[ i*2*DATA_BITS+DATA_BITS-1:i*2*DATA_BITS ];
         end else begin
             if( i<HALF_BURST_LENGTH-1 )
@@ -304,7 +317,7 @@ for( i=0; i<HALF_BURST_LENGTH; i++ ) begin : shift_value_gen
     end
 
     always_ff@(posedge ddr_clock_i) begin
-        if( current_op_write && bank_state_counter==0 ) begin
+        if( current_op_write && bank_state_counter_zero ) begin
             shift_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS] <= latched_write_data[ (i+1)*2*DATA_BITS-1:i*2*DATA_BITS+DATA_BITS ];
         end else begin
             if( i<HALF_BURST_LENGTH-1 )
