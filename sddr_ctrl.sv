@@ -40,7 +40,7 @@ module sddr_ctrl#(
         output                                          data_cmd_ack,
         output logic                                    data_rsp_ready,
         input [BURST_LENGTH*DATA_BITS-1:0]              data_cmd_data_i,
-        output [BURST_LENGTH*DATA_BITS-1:0]             data_data_o,
+        output [BURST_LENGTH*DATA_BITS-1:0]             data_rsp_data_o,
 
         // phy interfaces
         output logic                                    ddr3_cke_o,
@@ -89,13 +89,13 @@ wire bypass                     = !reset_state_ddr[3];
 assign ddr3_odt_o               = reset_state_ddr[4];
 //assign ddr3_cke_o               = reset_state_ddr[5];
 
-logic [BURST_LENGTH*DATA_BITS-1:0] latched_write_data;
+logic [CMD_DATA_BITS-1:0] latched_write_data, read_data_ddr, latched_read_value;
 logic [HALF_BURST_LENGTH*DATA_BITS-1:0] shift_value[1:0];
 
 assign ddr3_dq_o[0] = shift_value[0][DATA_BITS-1:0];
 assign ddr3_dq_o[1] = shift_value[1][DATA_BITS-1:0];
 
-enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_WRITE, BS_OP_END } bank_state = BS_PRECHARGED;
+enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_READ_END, BS_WRITE, BS_WRITE_END } bank_state = BS_PRECHARGED;
 reg[31:0] bank_state_counter = 0, bank_refersh_counter = 1;
 
 xpm_cdc_handshake#(
@@ -117,7 +117,7 @@ xpm_cdc_handshake#(
 
 logic[ADDRESS_BITS-1:0] data_cmd_address_ddr;
 logic[CMD_DATA_BITS-1:0] data_cmd_data_ddr;
-logic data_cmd_write_ddr;
+logic data_cmd_write_ddr, current_op_write;
 logic data_cmd_valid_cpu=1'b0, data_cmd_valid_ddr, data_cmd_ack_ddr=1'b0;
 logic data_cmd_ack_cpu;
 logic data_rsp_ready_ddr = 1'b0;
@@ -141,14 +141,21 @@ xpm_cdc_handshake#(
     .src_send( data_cmd_valid_cpu || (data_cmd_valid && data_cmd_ack) )
 );
 
-xpm_cdc_single#(
-    .SRC_INPUT_REG(0),
-    .DEST_SYNC_FF(2)
-) data_rsp_ready_cdc(
+xpm_cdc_handshake#(
+    .DEST_EXT_HSK(0),
+    .WIDTH( CMD_DATA_BITS ),
+    .SRC_SYNC_FF(2),
+    .DEST_SYNC_FF(3)
+) data_rsp_cdc(
     .src_clk(ddr_clock_i),
+    .src_in( latched_read_value ),
+    .src_rcv( data_rsp_cdc_ack_ddr ),
+    .src_send( data_rsp_ready_ddr ),
+
     .dest_clk(cpu_clock_i),
-    .src_in(data_rsp_ready_ddr),
-    .dest_out(data_rsp_ready)
+    .dest_ack(),
+    .dest_out( data_rsp_data_o ),
+    .dest_req( data_rsp_ready )
 );
 
 // CPU clock domain
@@ -183,8 +190,6 @@ end
 
 // DDR clock domain
 always_ff@(posedge ddr_clock_i) begin
-    data_rsp_ready_ddr <= 1'b0;
-
     if( bypass && override_cmd_ddr_ready ) begin
         ddr3_addr_o <= override_addr_ddr;
         ddr3_ba_o <= override_addr_ddr[31:31-BANK_BITS+1];
@@ -225,9 +230,12 @@ always_ff@(posedge ddr_clock_i) begin
                     end
                 end
                 BS_ACTIVATE_ROW: begin
+                    data_rsp_ready_ddr <= 0;
+
                     output_cmd <= 4'b0011; // Activate
                     ddr3_ba_o <= data_cmd_address_ddr[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
                     ddr3_addr_o <= data_cmd_address_ddr[COL_BITS+ROW_BITS-1:COL_BITS];
+                    current_op_write <= data_cmd_write_ddr;
                     bank_state <= BS_OP;
                     bank_state_counter <= tRCD;
                 end
@@ -252,18 +260,25 @@ always_ff@(posedge ddr_clock_i) begin
                 end
                 BS_WRITE: begin
                     bank_state_counter <= HALF_BURST_LENGTH-1;
-                    bank_state <= BS_OP_END;
+                    bank_state <= BS_WRITE_END;
                 end
                 BS_READ: begin
                     bank_state_counter <= HALF_BURST_LENGTH-1;
-                    bank_state <= BS_OP_END;
+                    bank_state <= BS_READ_END;
                 end
-                BS_OP_END: begin
+                BS_WRITE_END: begin
                     data_transfer_o <= 1'b0;
                     data_write_o <= 1'b0;
 
                     bank_state <= BS_PRECHARGED;
-                    bank_state_counter <= tRP + data_cmd_write_ddr ? write_recovery : 0;
+                    bank_state_counter <= tRP + write_recovery;
+                end
+                BS_READ_END: begin
+                    data_transfer_o <= 1'b0;
+                    data_write_o <= 1'b0;
+
+                    bank_state <= BS_PRECHARGED;
+                    bank_state_counter <= tRP;
 
                     data_rsp_ready_ddr <= 1;
                 end
@@ -278,30 +293,34 @@ generate
 
 for( i=0; i<HALF_BURST_LENGTH; i++ ) begin : shift_value_gen
     always_ff@(negedge ddr_clock_i) begin
-        if( bank_state==BS_WRITE && bank_state_counter==0 ) begin
-            shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] = latched_write_data[ i*2*DATA_BITS+DATA_BITS-1:i*2*DATA_BITS ];
+        if( current_op_write && bank_state_counter==0 ) begin
+            shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] <= latched_write_data[ i*2*DATA_BITS+DATA_BITS-1:i*2*DATA_BITS ];
         end else begin
             if( i<HALF_BURST_LENGTH-1 )
-                shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] = shift_value[0][(i+2)*DATA_BITS-1:(i+1)*DATA_BITS];
+                shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] <= shift_value[0][(i+2)*DATA_BITS-1:(i+1)*DATA_BITS];
             else
-                shift_value[0][HALF_BURST_LENGTH*DATA_BITS-1:(HALF_BURST_LENGTH-1)*DATA_BITS] = ddr3_dq_i[0];
+                shift_value[0][HALF_BURST_LENGTH*DATA_BITS-1:(HALF_BURST_LENGTH-1)*DATA_BITS] <= ddr3_dq_i[0];
         end
     end
 
     always_ff@(posedge ddr_clock_i) begin
-        if( bank_state==BS_WRITE && bank_state_counter==0 ) begin
-            shift_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS] = latched_write_data[ (i+1)*2*DATA_BITS-1:i*2*DATA_BITS+DATA_BITS ];
+        if( current_op_write && bank_state_counter==0 ) begin
+            shift_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS] <= latched_write_data[ (i+1)*2*DATA_BITS-1:i*2*DATA_BITS+DATA_BITS ];
         end else begin
             if( i<HALF_BURST_LENGTH-1 )
-                shift_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS] = shift_value[1][(i+2)*DATA_BITS-1:(i+1)*DATA_BITS];
+                shift_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS] <= shift_value[1][(i+2)*DATA_BITS-1:(i+1)*DATA_BITS];
             else
-                shift_value[1][HALF_BURST_LENGTH*DATA_BITS-1:(HALF_BURST_LENGTH-1)*DATA_BITS] = ddr3_dq_i[1];
+                shift_value[1][HALF_BURST_LENGTH*DATA_BITS-1:(HALF_BURST_LENGTH-1)*DATA_BITS] <= ddr3_dq_i[1];
         end
     end
 
-    assign data_data_o[ i*2*DATA_BITS+DATA_BITS-1:i*2*DATA_BITS ] = shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS];
-    assign data_data_o[ (i+1)*2*DATA_BITS-1:i*2*DATA_BITS+DATA_BITS ] = shift_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS];
+    // Map the results
+    assign read_data_ddr[DATA_BITS*(i*2+1)-1:DATA_BITS*i*2] = shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS];
+    assign read_data_ddr[DATA_BITS*(i+1)*2-1:DATA_BITS*(i*2+1)] = shift_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS];
 end
+
+always_ff@(negedge ddr_clock_i)
+    latched_read_value <= read_data_ddr;
 
 endgenerate
 
