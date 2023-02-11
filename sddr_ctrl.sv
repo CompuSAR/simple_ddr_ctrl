@@ -74,6 +74,7 @@ reset_state_cdc(.src_clk(cpu_clock_i), .dest_clk(ddr_clock_i), .src_in(reset_sta
 logic [3:0] override_cmd_cpu, override_cmd_ddr, output_cmd;
 logic override_cmd_cpu_send = 1'b0, override_cmd_ddr_ready, override_cmd_cpu_received;
 logic [31:0] override_addr_cpu, override_addr_ddr;
+logic odt_ddr = 1'b0;
 
 assign ddr3_we_n_o = output_cmd[0];
 assign ddr3_cas_n_o = output_cmd[1];
@@ -86,7 +87,7 @@ assign ddr_reset_n_o            = reset_state_ddr[0];
 assign ddr_phy_reset_n_o        = reset_state_ddr[1];
 wire ctrl_reset                 = reset_state_cpu[2];
 wire bypass                     = !reset_state_ddr[3];
-assign ddr3_odt_o               = reset_state_ddr[4];
+assign ddr3_odt_o               = reset_state_ddr[4] || !reset_state_ddr[4] && odt_ddr;
 //assign ddr3_cke_o               = reset_state_ddr[5];
 
 logic [CMD_DATA_BITS-1:0] latched_write_data, read_data_ddr, latched_read_value;
@@ -259,6 +260,7 @@ always_ff@(posedge ddr_clock_i) begin
                         bank_state_counter <= casWriteLatency;
                         bank_state_counter_zero <= 1'b0;
                         data_write_o <= 1'b1;
+                        odt_ddr <= 1'b1;
                     end
                     ddr3_ba_o <= data_cmd_address_ddr[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
                     ddr3_addr_o <= 0;
@@ -284,6 +286,8 @@ always_ff@(posedge ddr_clock_i) begin
                     bank_state <= BS_PRECHARGED;
                     bank_state_counter <= tRP + write_recovery;
                     bank_state_counter_zero <= 1'b0;
+
+                    odt_ddr <= 1'b0;
                 end
                 BS_READ_END: begin
                     data_transfer_o <= 1'b0;
