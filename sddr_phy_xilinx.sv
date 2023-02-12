@@ -72,22 +72,14 @@ always_ff@(negedge in_ddr_clock_i) begin
 end
 
 // Clock differential output
-logic naked_clock_signal;
-ODDR clock_signal_generator(
-    .Q(naked_clock_signal),
-    .C(in_ddr_clock_i),
-    .CE(phy_reset_n),
-    .D1(1'b1),
-    .D2(1'b0),
-    .R(phy_reset_p),
-    .S(1'b0)
-);
-
 OBUFDS clock_buffer(
-    .I(naked_clock_signal),
+    .I(in_ddr_clock_i),
     .O(ddr3_ck_p_o),
     .OB(ddr3_ck_n_o)
 );
+
+logic ddr_clock_gated;
+BUFGCE ddr_clock_gated_buffer(.I(in_ddr_clock_i), .CE(ctl_data_transfer_i), .O(ddr_clock_gated));
 
 genvar i;
 generate
@@ -107,8 +99,8 @@ generate
         );
         ODDR#(.DDR_CLK_EDGE("OPPOSITE_EDGE")) data_out_ddr(
             .Q(out_data_bit),
-            .C(in_ddr_clock_i),
-            .CE(ctl_data_transfer_i),
+            .C(ddr_clock_gated),
+            .CE(1'b1),
             .D1(ctl_dq_i[0][i]),
             .D2(ctl_dq_i[1][i]),
             .R(1'b0),
