@@ -96,10 +96,16 @@ logic [HALF_BURST_LENGTH*DATA_BITS-1:0] shift_value[1:0];
 assign ddr3_dq_o[0] = shift_value[0][DATA_BITS-1:0];
 assign ddr3_dq_o[1] = shift_value[1][DATA_BITS-1:0];
 
+localparam RefreshCounterBits = $clog2(tREFI);
+localparam RefreshCounterBitsLow = RefreshCounterBits/2, RefreshCounterBitsHigh = RefreshCounterBits-RefreshCounterBitsLow;
+
 enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_READ_END, BS_WRITE, BS_WRITE_END } bank_state = BS_PRECHARGED;
 reg[16:0] bank_state_counter = 0;
-reg[$clog2(tREFI)-1:0] refresh_counter = 1;
+reg[RefreshCounterBits-1:0] refresh_counter = 1;
 logic bank_state_counter_zero = 1'b0, refresh_counter_zero = 1'b0;
+
+wire[RefreshCounterBitsLow:0] refresh_counter_precalc_low = { 1'b1, refresh_counter[RefreshCounterBitsLow-1:0] }-1;
+wire[RefreshCounterBitsHigh-1:0] refresh_counter_precalc_high = refresh_counter[RefreshCounterBits-1:RefreshCounterBitsLow] - 1;
 
 xpm_cdc_handshake#(
     .DEST_EXT_HSK(0),
@@ -211,7 +217,11 @@ always_ff@(posedge ddr_clock_i) begin
         end
 
         if( !refresh_counter_zero ) begin
-            refresh_counter <= refresh_counter-1;
+            // refresh_counter-1, but with faster timing
+            refresh_counter[RefreshCounterBitsLow-1:0] <= refresh_counter_precalc_low[RefreshCounterBitsLow-1:0];
+            if( !refresh_counter_precalc_low[RefreshCounterBitsLow] )
+                refresh_counter[RefreshCounterBits-1:RefreshCounterBitsLow] <= refresh_counter_precalc_high;
+
             refresh_counter_zero <= refresh_counter==0;
         end
 
