@@ -98,8 +98,8 @@ assign ddr3_dq_o[1] = shift_value[1][DATA_BITS-1:0];
 
 enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_READ_END, BS_WRITE, BS_WRITE_END } bank_state = BS_PRECHARGED;
 reg[16:0] bank_state_counter = 0;
-reg[$clog2(tREFI)-1:0] bank_refresh_counter = 1;
-logic bank_state_counter_zero = 1'b0, bank_refresh_counter_zero = 1'b0;
+reg[$clog2(tREFI)-1:0] refresh_counter = 1;
+logic bank_state_counter_zero = 1'b0, refresh_counter_zero = 1'b0;
 
 xpm_cdc_handshake#(
     .DEST_EXT_HSK(0),
@@ -210,9 +210,9 @@ always_ff@(posedge ddr_clock_i) begin
                 data_cmd_ack_ddr<=1'b0;
         end
 
-        if( !bank_refresh_counter_zero ) begin
-            bank_refresh_counter <= bank_refresh_counter-1;
-            bank_refresh_counter_zero <= bank_refresh_counter==1;
+        if( !refresh_counter_zero ) begin
+            refresh_counter <= refresh_counter-1;
+            refresh_counter_zero <= refresh_counter==0;
         end
 
         if( !bank_state_counter_zero ) begin
@@ -221,9 +221,9 @@ always_ff@(posedge ddr_clock_i) begin
         end else begin
             case( bank_state )
                 BS_PRECHARGED: begin
-                    if( bank_refresh_counter_zero ) begin
-                        bank_refresh_counter <= tREFI;
-                        bank_refresh_counter_zero <= 1'b0;
+                    if( refresh_counter_zero ) begin
+                        refresh_counter <= tREFI;
+                        refresh_counter_zero <= 1'b0;
 
                         bank_state <= BS_PRECHARGED;
                         bank_state_counter <= tRFC;
