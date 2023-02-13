@@ -262,7 +262,7 @@ always_ff@(posedge ddr_clock_i) begin
                     if( !data_cmd_write_ddr ) begin
                         output_cmd <= 4'b0101;  // Read
                         bank_state <= BS_READ;
-                        bank_state_counter <= casReadLatency;
+                        bank_state_counter <= casReadLatency+1;
                         bank_state_counter_zero <= 1'b0;
                     end else begin
                         output_cmd <= 4'b0100;  // Write

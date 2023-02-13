@@ -110,8 +110,8 @@ generate
             .C(in_ddr_clock_90deg_i),
             .CE(1'b1),
             .D(in_data_bit),
-            .Q1(ctl_dq_o[0][i]),
-            .Q2(ctl_dq_o[1][i]),
+            .Q1(ctl_dq_o[1][i]),
+            .Q2(ctl_dq_o[0][i]),
             .R(1'b0),
             .S(1'b0)
         );
