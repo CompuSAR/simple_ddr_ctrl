@@ -319,7 +319,7 @@ genvar i;
 generate
 
 for( i=0; i<HALF_BURST_LENGTH; i++ ) begin : shift_value_gen
-    always_ff@(negedge ddr_clock_i) begin
+    always_ff@(posedge ddr_clock_i) begin
         if( current_op_write && bank_state_counter_zero ) begin
             shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] <= latched_write_data[ i*2*DATA_BITS+DATA_BITS-1:i*2*DATA_BITS ];
         end else begin

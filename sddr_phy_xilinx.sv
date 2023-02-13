@@ -99,7 +99,7 @@ generate
         );
         ODDR#(.DDR_CLK_EDGE("OPPOSITE_EDGE")) data_out_ddr(
             .Q(out_data_bit),
-            .C(ddr_clock_gated),
+            .C(in_ddr_clock_i),
             .CE(1'b1),
             .D1(ctl_dq_i[0][i]),
             .D2(ctl_dq_i[1][i]),
