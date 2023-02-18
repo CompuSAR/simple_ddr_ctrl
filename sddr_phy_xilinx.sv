@@ -44,7 +44,7 @@ module sddr_phy_xilinx#(
 
         output logic [BANK_BITS-1:0]                    ddr3_ba_o,
         output logic [ROW_BITS+$clog2(DATA_BITS/8)-1:0] ddr3_addr_o,
-        inout                                           ddr3_odt_o,
+        output logic                                    ddr3_odt_o,
         output [DATA_BITS/8-1:0]                        ddr3_dm_o,
         inout [DATA_BITS/8-1:0]                         ddr3_dqs_p_io,
         inout [DATA_BITS/8-1:0]                         ddr3_dqs_n_io,
@@ -54,7 +54,6 @@ module sddr_phy_xilinx#(
 assign ddr3_dm_o = { DATA_BITS/8{1'b0} };
 assign ddr3_reset_n_o = in_ddr_reset_n_i;
 assign ddr3_cs_n_o = ctl_cs_n_i;
-assign ddr3_odt_o = ctl_odt_i;
 
 logic phy_reset_n, phy_reset_p;
 xpm_cdc_sync_rst cdc_reset(.src_rst(in_phy_reset_n_i), .dest_clk(in_ddr_clock_i), .dest_rst(phy_reset_n));
@@ -64,6 +63,7 @@ always_ff@(negedge in_ddr_clock_i) begin
     ddr3_ras_n_o <= ctl_ras_n_i;
     ddr3_cas_n_o <= ctl_cas_n_i;
     ddr3_we_n_o <= ctl_we_n_i;
+    ddr3_odt_o <= ctl_odt_i;
 
     ddr3_addr_o <= ctl_addr_i;
     ddr3_ba_o <= ctl_ba_i;
