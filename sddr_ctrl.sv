@@ -86,7 +86,8 @@ assign ctrl_cmd_ack = !override_cmd_cpu_received && !override_cmd_cpu_send;
 assign ddr_reset_n_o            = reset_state_ddr[0];
 assign ddr_phy_reset_n_o        = reset_state_ddr[1];
 wire ctrl_reset                 = reset_state_cpu[2];
-wire bypass                     = !reset_state_ddr[3];
+wire bypass_ddr                 = !reset_state_ddr[3];
+wire bypass_cpu                 = !reset_state_cpu[3];
 assign ddr3_odt_o               = reset_state_ddr[4] || !reset_state_ddr[4] && odt_ddr;
 //assign ddr3_cke_o               = reset_state_ddr[5];
 
@@ -97,15 +98,11 @@ assign ddr3_dq_o[0] = shift_value[0][DATA_BITS-1:0];
 assign ddr3_dq_o[1] = shift_value[1][DATA_BITS-1:0];
 
 localparam RefreshCounterBits = $clog2(tREFI);
-localparam RefreshCounterBitsLow = RefreshCounterBits/2, RefreshCounterBitsHigh = RefreshCounterBits-RefreshCounterBitsLow;
 
 enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_READ_END, BS_WRITE, BS_WRITE_END } bank_state = BS_PRECHARGED;
 reg[16:0] bank_state_counter = 0;
-reg[RefreshCounterBits-1:0] refresh_counter = 1;
-logic bank_state_counter_zero = 1'b0, refresh_counter_zero = 1'b0;
-
-wire[RefreshCounterBitsLow:0] refresh_counter_precalc_low = { 1'b1, refresh_counter[RefreshCounterBitsLow-1:0] }-1;
-wire[RefreshCounterBitsHigh-1:0] refresh_counter_precalc_high = refresh_counter[RefreshCounterBits-1:RefreshCounterBitsLow] - 1;
+reg[RefreshCounterBits-1:0] refresh_counter = tREFI;
+logic bank_state_counter_zero = 1'b0;
 
 xpm_cdc_handshake#(
     .DEST_EXT_HSK(0),
@@ -130,6 +127,8 @@ logic data_cmd_write_ddr, current_op_write;
 logic data_cmd_valid_cpu=1'b0, data_cmd_valid_ddr, data_cmd_ack_ddr=1'b0;
 logic data_cmd_ack_cpu;
 logic data_rsp_ready_ddr = 1'b0;
+logic refresh_pending_cpu = 1'b0, refresh_pending_ddr;
+logic refresh_pending_ack_ddr = 1'b0, refresh_pending_ack_cpu;
 
 assign data_cmd_ack = !data_cmd_valid_cpu && !data_cmd_ack_cpu && reset_state_cpu[3]; // Override off
 
@@ -167,6 +166,26 @@ xpm_cdc_handshake#(
     .dest_req( data_rsp_ready )
 );
 
+xpm_cdc_single#(
+    .SRC_INPUT_REG(0)
+) refresh_pending_cdc(
+    .src_clk(cpu_clock_i),
+    .dest_clk(ddr_clock_i),
+
+    .src_in(refresh_pending_cpu),
+    .dest_out(refresh_pending_ddr)
+);
+
+xpm_cdc_single#(
+    .SRC_INPUT_REG(0)
+) refresh_pending_ack_cdc(
+    .src_clk(ddr_clock_i),
+    .dest_clk(cpu_clock_i),
+
+    .src_in(refresh_pending_ack_ddr),
+    .dest_out(refresh_pending_ack_cpu)
+);
+
 // CPU clock domain
 always_ff@(posedge cpu_clock_i) begin
     if( override_cmd_cpu_send && !override_cmd_cpu_received )
@@ -197,9 +216,23 @@ always_ff@(posedge cpu_clock_i) begin
     end
 end
 
+// Refresh counter management
+always_ff@(posedge cpu_clock_i) begin
+    if( refresh_pending_cpu && refresh_pending_ack_cpu )
+        refresh_pending_cpu <= 1'b0;
+
+    if( refresh_counter!=0 ) begin
+        if( !bypass_cpu )
+            refresh_counter <= refresh_counter-1;
+    end else begin
+        refresh_counter <= tREFI;
+        refresh_pending_cpu <= 1'b1;
+    end
+end
+
 // DDR clock domain
 always_ff@(posedge ddr_clock_i) begin
-    if( bypass && override_cmd_ddr_ready ) begin
+    if( bypass_ddr && override_cmd_ddr_ready ) begin
         ddr3_addr_o <= override_addr_ddr;
         ddr3_ba_o <= override_addr_ddr[31:31-BANK_BITS+1];
         ddr3_cke_o <= reset_state_ddr[5];
@@ -216,14 +249,8 @@ always_ff@(posedge ddr_clock_i) begin
                 data_cmd_ack_ddr<=1'b0;
         end
 
-        if( !refresh_counter_zero ) begin
-            // refresh_counter-1, but with faster timing
-            refresh_counter[RefreshCounterBitsLow-1:0] <= refresh_counter_precalc_low[RefreshCounterBitsLow-1:0];
-            if( !refresh_counter_precalc_low[RefreshCounterBitsLow] )
-                refresh_counter[RefreshCounterBits-1:RefreshCounterBitsLow] <= refresh_counter_precalc_high;
-
-            refresh_counter_zero <= refresh_counter==0;
-        end
+        if( refresh_pending_ack_ddr && !refresh_pending_ddr )
+            refresh_pending_ack_ddr <= 1'b0;
 
         if( !bank_state_counter_zero ) begin
             bank_state_counter<=bank_state_counter-1;
@@ -231,9 +258,8 @@ always_ff@(posedge ddr_clock_i) begin
         end else begin
             case( bank_state )
                 BS_PRECHARGED: begin
-                    if( refresh_counter_zero ) begin
-                        refresh_counter <= tREFI;
-                        refresh_counter_zero <= 1'b0;
+                    if( refresh_pending_ddr ) begin
+                        refresh_pending_ack_ddr <= 1'b1;
 
                         bank_state <= BS_PRECHARGED;
                         bank_state_counter <= tRFC;
