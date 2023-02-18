@@ -54,7 +54,7 @@ module sddr_phy_xilinx#(
 assign ddr3_dm_o = { DATA_BITS/8{1'b0} };
 assign ddr3_reset_n_o = in_ddr_reset_n_i;
 assign ddr3_cs_n_o = ctl_cs_n_i;
-IOBUF odt_buffer( .I(ctl_odt_i), .T(!ddr3_reset_n_o), .IO(ddr3_odt_o), .O() );
+assign ddr3_odt_o = ctl_odt_i;
 
 logic phy_reset_n, phy_reset_p;
 xpm_cdc_sync_rst cdc_reset(.src_rst(in_phy_reset_n_i), .dest_clk(in_ddr_clock_i), .dest_rst(phy_reset_n));
@@ -97,7 +97,7 @@ generate
             .O(in_data_bit),
             .T(!ctl_data_write_i)
         );
-        ODDR#(.DDR_CLK_EDGE("OPPOSITE_EDGE")) data_out_ddr(
+        ODDR#(.DDR_CLK_EDGE("SAME_EDGE")) data_out_ddr(
             .Q(out_data_bit),
             .C(in_ddr_clock_i),
             .CE(1'b1),
@@ -106,12 +106,12 @@ generate
             .R(1'b0),
             .S(1'b0)
         );
-        IDDR#(.DDR_CLK_EDGE("OPPOSITE_EDGE")) data_in_ddr(
+        IDDR#(.DDR_CLK_EDGE("SAME_EDGE_PIPELINED")) data_in_ddr(
             .C(in_ddr_clock_90deg_i),
             .CE(1'b1),
             .D(in_data_bit),
-            .Q1(ctl_dq_o[1][i]),
-            .Q2(ctl_dq_o[0][i]),
+            .Q1(ctl_dq_o[0][i]),
+            .Q2(ctl_dq_o[1][i]),
             .R(1'b0),
             .S(1'b0)
         );

@@ -267,7 +267,7 @@ always_ff@(posedge ddr_clock_i) begin
                     end else begin
                         output_cmd <= 4'b0100;  // Write
                         bank_state <= BS_WRITE;
-                        bank_state_counter <= casWriteLatency;
+                        bank_state_counter <= casWriteLatency-1;
                         bank_state_counter_zero <= 1'b0;
                         data_write_o <= 1'b1;
                         odt_ddr <= 1'b1;
@@ -280,7 +280,7 @@ always_ff@(posedge ddr_clock_i) begin
                     ddr3_addr_o[10] <= 1'b1;       // Auto precharge
                 end
                 BS_WRITE: begin
-                    bank_state_counter <= HALF_BURST_LENGTH-1;
+                    bank_state_counter <= HALF_BURST_LENGTH;
                     bank_state_counter_zero <= 1'b0;
                     bank_state <= BS_WRITE_END;
                 end
