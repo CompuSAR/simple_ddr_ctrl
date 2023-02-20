@@ -55,7 +55,7 @@ assign ddr3_dm_o = { DATA_BITS/8{1'b0} };
 assign ddr3_reset_n_o = in_ddr_reset_n_i;
 assign ddr3_cs_n_o = ctl_cs_n_i;
 
-logic phy_reset_n, phy_reset_p;
+logic phy_reset_n;
 xpm_cdc_sync_rst cdc_reset(.src_rst(in_phy_reset_n_i), .dest_clk(in_ddr_clock_i), .dest_rst(phy_reset_n));
 
 always_ff@(negedge in_ddr_clock_i) begin
@@ -67,8 +67,6 @@ always_ff@(negedge in_ddr_clock_i) begin
 
     ddr3_addr_o <= ctl_addr_i;
     ddr3_ba_o <= ctl_ba_i;
-
-    phy_reset_p <= !phy_reset_n;
 end
 
 // Clock differential output
@@ -77,9 +75,6 @@ OBUFDS clock_buffer(
     .O(ddr3_ck_p_o),
     .OB(ddr3_ck_n_o)
 );
-
-logic ddr_clock_gated;
-BUFGCE ddr_clock_gated_buffer(.I(in_ddr_clock_i), .CE(ctl_data_transfer_i), .O(ddr_clock_gated));
 
 genvar i;
 generate

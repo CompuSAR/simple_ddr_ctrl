@@ -53,8 +53,7 @@ module sddr_ctrl#(
         output logic [BANK_BITS-1:0]                    ddr3_ba_o,
         output logic [ROW_BITS+$clog2(DATA_BITS/8)-1:0] ddr3_addr_o,
         output                                          ddr3_odt_o,
-        output [DATA_BITS/8-1:0]                        ddr3_dm_o,
-        output                                          ddr3_dq_enable_o,
+//        output [DATA_BITS/8-1:0]                        ddr3_dm_o,
         output [DATA_BITS-1:0]                          ddr3_dq_o[1:0],
         input [DATA_BITS-1:0]                           ddr3_dq_i[1:0],
 
@@ -75,6 +74,10 @@ logic [3:0] override_cmd_cpu, override_cmd_ddr, output_cmd;
 logic override_cmd_cpu_send = 1'b0, override_cmd_ddr_ready, override_cmd_cpu_received;
 logic [31:0] override_addr_cpu, override_addr_ddr;
 logic odt_ddr = 1'b0;
+
+// No read registers
+assign ctrl_rsp_ready = 1'b1;
+assign ctrl_rsp_data = 32'b0;
 
 assign ddr3_we_n_o = output_cmd[0];
 assign ddr3_cas_n_o = output_cmd[1];
