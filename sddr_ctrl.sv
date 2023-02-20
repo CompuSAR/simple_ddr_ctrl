@@ -245,13 +245,6 @@ always_ff@(posedge ddr_clock_i) begin
         ddr3_addr_o <= 0;
         ddr3_ba_o <= 0;
 
-        if( !data_cmd_valid_ddr ) begin
-            // Reset the ACK if we're past the state where we no longer need
-            // the latches in the CDC
-            if( bank_state!=BS_PRECHARGED && bank_state!=BS_ACTIVATE_ROW )
-                data_cmd_ack_ddr<=1'b0;
-        end
-
         if( refresh_pending_ack_ddr && !refresh_pending_ddr )
             refresh_pending_ack_ddr <= 1'b0;
 
@@ -287,6 +280,7 @@ always_ff@(posedge ddr_clock_i) begin
                     bank_state_counter_zero <= 1'b0;
                 end
                 BS_OP: begin
+                    data_cmd_ack_ddr <= 1'b0;
                     data_transfer_o <= 1'b1;
                     if( !data_cmd_write_ddr ) begin
                         output_cmd <= 4'b0101;  // Read
