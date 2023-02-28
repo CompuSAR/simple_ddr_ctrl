@@ -58,7 +58,7 @@ assign ddr3_cs_n_o = ctl_cs_n_i;
 logic phy_reset_n;
 xpm_cdc_sync_rst cdc_reset(.src_rst(in_phy_reset_n_i), .dest_clk(in_ddr_clock_i), .dest_rst(phy_reset_n));
 
-always_ff@(negedge in_ddr_clock_i) begin
+always_ff@(posedge in_ddr_clock_i) begin
     ddr3_cke_o <= ctl_cke_i;
     ddr3_ras_n_o <= ctl_ras_n_i;
     ddr3_cas_n_o <= ctl_cas_n_i;
@@ -76,12 +76,42 @@ OBUFDS clock_buffer(
     .OB(ddr3_ck_n_o)
 );
 
+//(* IODELAY_GROUP = "DQSCLOCK" *)
+
+IDELAYCTRL dqs_clock_delay_ctrl(
+    .RDY(),
+    .REFCLK(in_ddr_clock_i),
+    .RST(1'b0)
+);
+
+logic delay_inc;
+logic dqs_clock;
+IDELAYE2#(
+    .DELAY_SRC("DATAIN"),
+    .HIGH_PERFORMANCE_MODE("TRUE"),
+    .IDELAY_TYPE("VARIABLE"),
+    .REFCLK_FREQUENCY(303.1),
+    .SIGNAL_PATTERN("CLOCK")
+) dqs_clock_delay(
+    .C(in_ddr_clock_i),
+    .CE(delay_inc),
+    .CINVCTRL(1'b0),
+    .DATAIN(in_ddr_clock_i),
+    .CNTVALUEIN(5'b0),
+    .CNTVALUEOUT(),
+    .DATAOUT(dqs_clock),
+    .INC(1'b1),
+    .LD(1'b0),
+    .LDPIPEEN(1'b0),
+    .REGRST(1'b0)
+);
+
 genvar i;
 generate
     for(i=0; i<DATA_BITS/8; i++) begin : dqs_gen
-        logic dqs;
+        logic dqs_in;
         IOBUFDS dqs_buffer(
-            .IO(ddr3_dqs_p_io[i]), .IOB(ddr3_dqs_n_io[i]), .O(dqs), .I(in_ddr_clock_90deg_i), .T(!ctl_data_write_i));
+            .IO(ddr3_dqs_p_io[i]), .IOB(ddr3_dqs_n_io[i]), .O(dqs_in), .I(dqs_clock), .T(!ctl_data_write_i));
     end : dqs_gen
 
     for(i=0; i<DATA_BITS; i++) begin : data_gen
@@ -102,7 +132,7 @@ generate
             .S(1'b0)
         );
         IDDR#(.DDR_CLK_EDGE("SAME_EDGE_PIPELINED")) data_in_ddr(
-            .C(in_ddr_clock_90deg_i),
+            .C(dqs_gen[i/8].dqs_in),
             .CE(1'b1),
             .D(in_data_bit),
             .Q1(ctl_dq_o[0][i]),
