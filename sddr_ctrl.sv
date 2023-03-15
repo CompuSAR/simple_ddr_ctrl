@@ -58,7 +58,8 @@ module sddr_ctrl#(
         input [DATA_BITS-1:0]                           ddr3_dq_i[1:0],
 
         output logic                                    data_transfer_o,
-        output logic                                    data_write_o
+        output logic                                    data_write_o,
+        output                                          write_level_o
     );
 
 localparam ADDRESS_BITS = BANK_BITS+ROW_BITS+COL_BITS+$clog2(DATA_BITS/8);
@@ -93,6 +94,7 @@ wire bypass_ddr                 = !reset_state_ddr[3];
 wire bypass_cpu                 = !reset_state_cpu[3];
 assign ddr3_odt_o               = reset_state_ddr[4] || !reset_state_ddr[4] && odt_ddr;
 //assign ddr3_cke_o               = reset_state_ddr[5];
+assign write_level_0            = reset_state_ddr[6];
 
 logic [CMD_DATA_BITS-1:0] latched_write_data, read_data_ddr, latched_read_value;
 logic [HALF_BURST_LENGTH*DATA_BITS-1:0] shift_value[1:0];

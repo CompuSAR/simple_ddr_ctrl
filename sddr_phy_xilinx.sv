@@ -28,6 +28,7 @@ module sddr_phy_xilinx#(
 
         input                                           ctl_data_transfer_i,
         input                                           ctl_data_write_i,
+        input                                           ctl_write_level_i,
 
 
         // Outside interfaces
@@ -76,7 +77,7 @@ OBUFDS clock_buffer(
     .OB(ddr3_ck_n_o)
 );
 
-//(* IODELAY_GROUP = "DQSCLOCK" *)
+(* IODELAY_GROUP = "DQSCLOCK" *)
 
 IDELAYCTRL dqs_clock_delay_ctrl(
     .RDY(),
@@ -86,6 +87,8 @@ IDELAYCTRL dqs_clock_delay_ctrl(
 
 logic delay_inc;
 logic dqs_clock;
+
+(* IODELAY_GROUP = "DQSCLOCK" *)
 IDELAYE2#(
     .DELAY_SRC("DATAIN"),
     .HIGH_PERFORMANCE_MODE("TRUE"),
@@ -111,7 +114,7 @@ generate
     for(i=0; i<DATA_BITS/8; i++) begin : dqs_gen
         logic dqs_in;
         IOBUFDS dqs_buffer(
-            .IO(ddr3_dqs_p_io[i]), .IOB(ddr3_dqs_n_io[i]), .O(dqs_in), .I(dqs_clock), .T(!ctl_data_write_i));
+            .IO(ddr3_dqs_p_io[i]), .IOB(ddr3_dqs_n_io[i]), .O(dqs_in), .I(dqs_clock), .T( !(ctl_data_write_i||ctl_write_level_i) ));
     end : dqs_gen
 
     for(i=0; i<DATA_BITS; i++) begin : data_gen
@@ -120,7 +123,7 @@ generate
             .IO(ddr3_dq_io[i]),
             .I(out_data_bit),
             .O(in_data_bit),
-            .T(!ctl_data_write_i)
+            .T(!ctl_data_write_i || ctl_write_level_i)
         );
         ODDR#(.DDR_CLK_EDGE("SAME_EDGE")) data_out_ddr(
             .Q(out_data_bit),
@@ -142,5 +145,7 @@ generate
         );
     end : data_gen
 endgenerate
+
+assign delay_inc = !data_gen[0].in_data_bit && (DATA_BITS>8 ? !data_gen[8].in_data_bit : 1'b1) && ctl_write_level_i;
 
 endmodule
