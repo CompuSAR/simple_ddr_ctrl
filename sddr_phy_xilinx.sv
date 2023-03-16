@@ -29,6 +29,7 @@ module sddr_phy_xilinx#(
         input                                           ctl_data_transfer_i,
         input                                           ctl_data_write_i,
         input                                           ctl_write_level_i,
+        input                                           ctl_out_dqs_i,
 
 
         // Outside interfaces
@@ -59,7 +60,7 @@ assign ddr3_cs_n_o = ctl_cs_n_i;
 logic phy_reset_n;
 xpm_cdc_sync_rst cdc_reset(.src_rst(in_phy_reset_n_i), .dest_clk(in_ddr_clock_i), .dest_rst(phy_reset_n));
 
-always_ff@(posedge in_ddr_clock_i) begin
+always_ff@(negedge in_ddr_clock_i) begin
     ddr3_cke_o <= ctl_cke_i;
     ddr3_ras_n_o <= ctl_ras_n_i;
     ddr3_cas_n_o <= ctl_cas_n_i;
@@ -113,8 +114,9 @@ genvar i;
 generate
     for(i=0; i<DATA_BITS/8; i++) begin : dqs_gen
         logic dqs_in;
+        wire direction = !(ctl_data_write_i||ctl_out_dqs_i);
         IOBUFDS dqs_buffer(
-            .IO(ddr3_dqs_p_io[i]), .IOB(ddr3_dqs_n_io[i]), .O(dqs_in), .I(dqs_clock), .T( !(ctl_data_write_i||ctl_write_level_i) ));
+            .IO(ddr3_dqs_p_io[i]), .IOB(ddr3_dqs_n_io[i]), .O(dqs_in), .I(dqs_clock), .T( direction ));
     end : dqs_gen
 
     for(i=0; i<DATA_BITS; i++) begin : data_gen
