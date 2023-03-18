@@ -24,7 +24,7 @@ module sddr_phy_xilinx#(
         input [ROW_BITS+$clog2(DATA_BITS/8)-1:0]        ctl_addr_i,
         input [BANK_BITS-1:0]                           ctl_ba_i,
         input [DATA_BITS-1:0]                           ctl_dq_i[1:0],
-        output [DATA_BITS-1:0]                          ctl_dq_o[1:0],
+        output [DATA_BITS-1:0]                          ctl_dq_o[8:1],
 
         input                                           ctl_data_transfer_i,
         input                                           ctl_data_write_i,
@@ -52,6 +52,8 @@ module sddr_phy_xilinx#(
         inout [DATA_BITS/8-1:0]                         ddr3_dqs_n_io,
         inout [DATA_BITS-1:0]                           ddr3_dq_io
     );
+
+localparam BURST_LENGTH = 8;
 
 assign ddr3_dm_o = { DATA_BITS/8{1'b0} };
 assign ddr3_reset_n_o = in_ddr_reset_n_i;
@@ -136,6 +138,38 @@ generate
             .R(1'b0),
             .S(1'b0)
         );
+        ISERDESE2#(
+            .DATA_RATE("DDR"),
+            .DATA_WIDTH(BURST_LENGTH),
+            .IOBDELAY("NONE"),
+            .NUM_CE(1)
+        ) data_in_ddr(
+            .CLK(dqs_gen[i/8].dqs_in),
+            .CLKB(! dqs_gen[i/8].dqs_in),
+            .OCLK(in_ddr_clock_i),
+            .OCLKB(!in_ddr_clock_i),
+            .CLKDIV(in_ddr_clock_i),
+            .D(in_data_bit),
+
+            .RST(!in_phy_reset_n_i),
+            .Q1(ctl_dq_o[1][i]),
+            .Q2(ctl_dq_o[2][i]),
+            .Q3(ctl_dq_o[3][i]),
+            .Q4(ctl_dq_o[4][i]),
+            .Q5(ctl_dq_o[5][i]),
+            .Q6(ctl_dq_o[6][i]),
+            .Q7(ctl_dq_o[7][i]),
+            .Q8(ctl_dq_o[8][i]),
+            .CE1(1'b1),
+
+            .DDLY(1'b0),
+            .CLKDIVP(1'b0),     // MIG only port
+            .BITSLIP(1'b0),
+            .SHIFTIN1(1'b0),
+            .SHIFTIN2(1'b0),
+            .OFB(1'b0)
+        );
+        /*
         IDDR#(.DDR_CLK_EDGE("SAME_EDGE_PIPELINED")) data_in_ddr(
             .C(dqs_gen[i/8].dqs_in),
             .CE(1'b1),
@@ -145,6 +179,7 @@ generate
             .R(1'b0),
             .S(1'b0)
         );
+        */
     end : data_gen
 endgenerate
 
