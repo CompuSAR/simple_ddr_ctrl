@@ -111,7 +111,6 @@ IDELAYE2#(
     .LDPIPEEN(1'b0),
     .REGRST(1'b0)
 );
-
 genvar i;
 generate
     for(i=0; i<DATA_BITS/8; i++) begin : dqs_gen
@@ -122,7 +121,7 @@ generate
     end : dqs_gen
 
     for(i=0; i<DATA_BITS; i++) begin : data_gen
-        logic in_data_bit, out_data_bit;
+        logic in_data_bit, out_data_bit, data_bit_delayed;
         IOBUF data_buf(
             .IO(ddr3_dq_io[i]),
             .I(out_data_bit),
@@ -138,18 +137,39 @@ generate
             .R(1'b0),
             .S(1'b0)
         );
+        (* IODELAY_GROUP = "DQSCLOCK" *)
+        IDELAYE2#(
+            .DELAY_SRC("IDATAIN"),
+            .HIGH_PERFORMANCE_MODE("TRUE"),
+            .IDELAY_TYPE("VARIABLE"),
+            .REFCLK_FREQUENCY(303.1),
+            .SIGNAL_PATTERN("DATA")
+        ) data_in_delay(
+            .C(in_ddr_clock_i),
+            .CE(delay_inc),
+            .CINVCTRL(1'b0),
+            .IDATAIN(in_data_bit),
+            .CNTVALUEIN(5'b0),
+            .CNTVALUEOUT(),
+            .DATAOUT(data_bit_delayed),
+            .INC(1'b1),
+            .LD(1'b0),
+            .LDPIPEEN(1'b0),
+            .REGRST(1'b0)
+        );
         ISERDESE2#(
             .DATA_RATE("DDR"),
             .DATA_WIDTH(BURST_LENGTH),
-            .IOBDELAY("NONE"),
+            .IOBDELAY("BOTH"),
             .NUM_CE(1)
         ) data_in_ddr(
-            .CLK(dqs_gen[i/8].dqs_in),
-            .CLKB(! dqs_gen[i/8].dqs_in),
+            .CLK(in_ddr_clock_i),
+            .CLKB(! in_ddr_clock_i),
             .OCLK(in_ddr_clock_i),
             .OCLKB(!in_ddr_clock_i),
             .CLKDIV(in_ddr_clock_i),
-            .D(in_data_bit),
+            .DDLY(data_bit_delayed),
+            //.D(in_data_bit),
 
             .RST(!in_phy_reset_n_i),
             .Q1(ctl_dq_o[1][i]),
@@ -162,7 +182,6 @@ generate
             .Q8(ctl_dq_o[8][i]),
             .CE1(1'b1),
 
-            .DDLY(1'b0),
             .CLKDIVP(1'b0),     // MIG only port
             .BITSLIP(1'b0),
             .SHIFTIN1(1'b0),
@@ -183,6 +202,6 @@ generate
     end : data_gen
 endgenerate
 
-assign delay_inc = !data_gen[0].in_data_bit && (DATA_BITS>8 ? !data_gen[8].in_data_bit : 1'b1) && ctl_write_level_i;
+assign delay_inc = !data_gen[0].data_bit_delayed && (DATA_BITS>8 ? !data_gen[8].data_bit_delayed : 1'b1) && ctl_write_level_i;
 
 endmodule
