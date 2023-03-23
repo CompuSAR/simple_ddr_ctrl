@@ -55,7 +55,7 @@ module sddr_ctrl#(
         output                                          ddr3_odt_o,
 //        output [DATA_BITS/8-1:0]                        ddr3_dm_o,
         output [DATA_BITS-1:0]                          ddr3_dq_o[1:0],
-        input [DATA_BITS-1:0]                           ddr3_dq_i[BURST_LENGTH-1:0],
+        input [DATA_BITS-1:0]                           ddr3_dq_i[1:0],
 
         output logic                                    data_transfer_o,
         output logic                                    data_write_o,
@@ -98,7 +98,7 @@ assign ddr3_odt_o               = reset_state_ddr[4] || !reset_state_ddr[4] && o
 assign write_level_o            = reset_state_ddr[6];
 assign dqs_out_o                = reset_state_ddr[7];
 
-logic [CMD_DATA_BITS-1:0] latched_write_data, ordered_read_value, latched_read_value;
+logic [CMD_DATA_BITS-1:0] latched_write_data, read_data_ddr, latched_read_value;
 logic [HALF_BURST_LENGTH*DATA_BITS-1:0] shift_value[1:0];
 
 assign ddr3_dq_o[0] = shift_value[0][DATA_BITS-1:0];
@@ -334,7 +334,6 @@ always_ff@(posedge ddr_clock_i) begin
                     bank_state_counter <= tRP;
                     bank_state_counter_zero <= 1'b0;
 
-                    latched_read_value <= ordered_read_value;
                     data_rsp_ready_ddr <= 1;
                 end
             endcase
@@ -350,6 +349,11 @@ for( i=0; i<HALF_BURST_LENGTH; i++ ) begin : shift_value_gen
     always_ff@(posedge ddr_clock_i) begin
         if( current_op_write && bank_state_counter_zero ) begin
             shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] <= latched_write_data[ i*2*DATA_BITS+DATA_BITS-1:i*2*DATA_BITS ];
+        end else begin
+            if( i<HALF_BURST_LENGTH-1 )
+                shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS] <= shift_value[0][(i+2)*DATA_BITS-1:(i+1)*DATA_BITS];
+            else
+                shift_value[0][HALF_BURST_LENGTH*DATA_BITS-1:(HALF_BURST_LENGTH-1)*DATA_BITS] <= ddr3_dq_i[0];
         end
     end
 
@@ -363,11 +367,14 @@ for( i=0; i<HALF_BURST_LENGTH; i++ ) begin : shift_value_gen
                 shift_value[1][HALF_BURST_LENGTH*DATA_BITS-1:(HALF_BURST_LENGTH-1)*DATA_BITS] <= ddr3_dq_i[1];
         end
     end
+
+    // Map the results
+    assign read_data_ddr[DATA_BITS*(i*2+1)-1:DATA_BITS*i*2] = shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS];
+    assign read_data_ddr[DATA_BITS*(i+1)*2-1:DATA_BITS*(i*2+1)] = shift_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS];
 end
 
-for(i=0; i<BURST_LENGTH; ++i) begin : read_map
-    assign ordered_read_value[DATA_BITS*(i+1)-1:DATA_BITS*i] = ddr3_dq_i[i];
-end
+always_ff@(negedge ddr_clock_i)
+    latched_read_value <= read_data_ddr;
 
 endgenerate
 

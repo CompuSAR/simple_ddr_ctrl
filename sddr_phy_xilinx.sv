@@ -24,7 +24,7 @@ module sddr_phy_xilinx#(
         input [ROW_BITS+$clog2(DATA_BITS/8)-1:0]        ctl_addr_i,
         input [BANK_BITS-1:0]                           ctl_ba_i,
         input [DATA_BITS-1:0]                           ctl_dq_i[1:0],
-        output [DATA_BITS-1:0]                          ctl_dq_o[8:1],
+        output [DATA_BITS-1:0]                          ctl_dq_o[1:0],
 
         input                                           ctl_data_transfer_i,
         input                                           ctl_data_write_i,
@@ -52,8 +52,6 @@ module sddr_phy_xilinx#(
         inout [DATA_BITS/8-1:0]                         ddr3_dqs_n_io,
         inout [DATA_BITS-1:0]                           ddr3_dq_io
     );
-
-localparam BURST_LENGTH = 8;
 
 assign ddr3_dm_o = { DATA_BITS/8{1'b0} };
 assign ddr3_reset_n_o = in_ddr_reset_n_i;
@@ -111,6 +109,7 @@ IDELAYE2#(
     .LDPIPEEN(1'b0),
     .REGRST(1'b0)
 );
+
 genvar i;
 generate
     for(i=0; i<DATA_BITS/8; i++) begin : dqs_gen
@@ -121,7 +120,7 @@ generate
     end : dqs_gen
 
     for(i=0; i<DATA_BITS; i++) begin : data_gen
-        logic in_data_bit, out_data_bit, data_bit_delayed;
+        logic in_data_bit, out_data_bit;
         IOBUF data_buf(
             .IO(ddr3_dq_io[i]),
             .I(out_data_bit),
@@ -137,58 +136,6 @@ generate
             .R(1'b0),
             .S(1'b0)
         );
-        (* IODELAY_GROUP = "DQSCLOCK" *)
-        IDELAYE2#(
-            .DELAY_SRC("IDATAIN"),
-            .HIGH_PERFORMANCE_MODE("TRUE"),
-            .IDELAY_TYPE("VARIABLE"),
-            .REFCLK_FREQUENCY(303.1),
-            .SIGNAL_PATTERN("DATA")
-        ) data_in_delay(
-            .C(in_ddr_clock_i),
-            .CE(delay_inc),
-            .CINVCTRL(1'b0),
-            .IDATAIN(in_data_bit),
-            .CNTVALUEIN(5'b0),
-            .CNTVALUEOUT(),
-            .DATAOUT(data_bit_delayed),
-            .INC(1'b1),
-            .LD(1'b0),
-            .LDPIPEEN(1'b0),
-            .REGRST(1'b0)
-        );
-        ISERDESE2#(
-            .DATA_RATE("DDR"),
-            .DATA_WIDTH(BURST_LENGTH),
-            .IOBDELAY("BOTH"),
-            .NUM_CE(1)
-        ) data_in_ddr(
-            .CLK(in_ddr_clock_i),
-            .CLKB(! in_ddr_clock_i),
-            .OCLK(in_ddr_clock_i),
-            .OCLKB(!in_ddr_clock_i),
-            .CLKDIV(in_ddr_clock_i),
-            .DDLY(data_bit_delayed),
-            //.D(in_data_bit),
-
-            .RST(!in_phy_reset_n_i),
-            .Q1(ctl_dq_o[1][i]),
-            .Q2(ctl_dq_o[2][i]),
-            .Q3(ctl_dq_o[3][i]),
-            .Q4(ctl_dq_o[4][i]),
-            .Q5(ctl_dq_o[5][i]),
-            .Q6(ctl_dq_o[6][i]),
-            .Q7(ctl_dq_o[7][i]),
-            .Q8(ctl_dq_o[8][i]),
-            .CE1(1'b1),
-
-            .CLKDIVP(1'b0),     // MIG only port
-            .BITSLIP(1'b0),
-            .SHIFTIN1(1'b0),
-            .SHIFTIN2(1'b0),
-            .OFB(1'b0)
-        );
-        /*
         IDDR#(.DDR_CLK_EDGE("SAME_EDGE_PIPELINED")) data_in_ddr(
             .C(dqs_gen[i/8].dqs_in),
             .CE(1'b1),
@@ -198,10 +145,9 @@ generate
             .R(1'b0),
             .S(1'b0)
         );
-        */
     end : data_gen
 endgenerate
 
-assign delay_inc = !data_gen[0].data_bit_delayed && (DATA_BITS>8 ? !data_gen[8].data_bit_delayed : 1'b1) && ctl_write_level_i;
+assign delay_inc = !data_gen[0].in_data_bit && (DATA_BITS>8 ? !data_gen[8].in_data_bit : 1'b1) && ctl_write_level_i;
 
 endmodule
