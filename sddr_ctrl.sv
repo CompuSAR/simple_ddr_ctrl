@@ -60,6 +60,7 @@ module sddr_ctrl#(
         output logic                                    data_transfer_o,
         output logic                                    data_write_o = 1'b0,
         output                                          write_level_o,
+        output [31:0]                                   delay_inc_o,
         output                                          dqs_out_o
     );
 
@@ -82,7 +83,7 @@ assign ddr3_cas_n_o = output_cmd[1];
 assign ddr3_ras_n_o = output_cmd[2];
 assign ddr3_cs_n_o = output_cmd[3];
 
-assign ctrl_cmd_ack = !override_cmd_cpu_received && !override_cmd_cpu_send;
+assign ctrl_cmd_ack = !override_cmd_cpu_received && !override_cmd_cpu_send && (!delay_inc_ack_cpu && !delay_inc_send_cpu);
 
 assign ddr_reset_n_o            = reset_state_ddr[0];
 assign ddr_phy_reset_n_o        = reset_state_ddr[1];
@@ -195,6 +196,25 @@ xpm_cdc_single#(
     .dest_out(refresh_pending_ack_cpu)
 );
 
+logic[1:0] delay_inc_cpu=2'b0, delay_inc_ddr;
+logic delay_inc_send_cpu = 1'b0, delay_in_send_ddr, delay_inc_ack_cpu;
+xpm_cdc_handshake#(
+    .DEST_EXT_HSK(0),
+    .DEST_SYNC_FF(2),
+    .SRC_SYNC_FF(2),
+    .WIDTH(2)
+) delay_inc_cdc(
+    .src_clk(cpu_clock_i),
+    .src_in(delay_inc_cpu),
+    .src_send(delay_inc_send_cpu),
+    .src_rcv(delay_inc_ack_cpu),
+
+    .dest_clk(ddr_clock_i),
+    .dest_req(delay_inc_send_ddr),
+    .dest_out(delay_inc_ddr)
+);
+assign delay_inc_o = delay_inc_send_ddr ? { 30'b0, delay_inc_ddr } : 32'b0;
+
 // CPU clock domain
 always_ff@(posedge cpu_clock_i) begin
     if( override_cmd_cpu_send && !override_cmd_cpu_received )
@@ -202,18 +222,27 @@ always_ff@(posedge cpu_clock_i) begin
     else
         override_cmd_cpu_send <= 1'b0;
 
+    if( delay_inc_ack_cpu ) begin
+        delay_inc_send_cpu <= 1'b0;
+        delay_inc_cpu <= 2'b0;
+    end
+
     if( ctrl_cmd_valid && ctrl_cmd_ack ) begin
         if( ctrl_cmd_write ) begin
             case(ctrl_cmd_address[15:0])
-                16'h0000: begin                             // Reset state
+                16'h0000: begin                                 // Reset state
                     reset_state_cpu <= ctrl_cmd_data;
                 end
-                16'h0004: begin                             // Override command
+                16'h0004: begin                                 // Override command
                     override_cmd_cpu <= ctrl_cmd_data;
                     override_cmd_cpu_send <= 1'b1;
                 end
-                16'h0008: begin                             // Override address
+                16'h0008: begin                                 // Override address
                     override_addr_cpu <= ctrl_cmd_data;
+                end
+                16'h0010: begin                                 // Delay increase
+                    delay_inc_cpu <= ctrl_cmd_data;
+                    delay_inc_send_cpu <= 1'b1;
                 end
             endcase
         end else begin
@@ -262,6 +291,7 @@ always_ff@(posedge ddr_clock_i) begin
         if( override_cmd_ddr==4'b0101 ) begin         // READ
             bank_state <= BS_OP;
             bypass_write <= 1'b0;
+            data_rsp_ready_ddr <= 0;
         end else begin
             ddr3_addr_o <= override_addr_ddr;
             ddr3_ba_o <= override_addr_ddr[31:31-BANK_BITS+1];

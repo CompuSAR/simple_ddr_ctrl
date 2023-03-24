@@ -29,6 +29,7 @@ module sddr_phy_xilinx#(
         input                                           ctl_data_transfer_i,
         input                                           ctl_data_write_i,
         input                                           ctl_write_level_i,
+        input [31:0]                                    ctl_delay_inc_i,
         input                                           ctl_out_dqs_i,
 
 
@@ -121,7 +122,7 @@ IDELAYE2#(
     .SIGNAL_PATTERN("CLOCK")
 ) in_data_delay(
     .C(in_ddr_clock_i),
-    .CE(1'b0),
+    .CE(ctl_delay_inc_i[1]),
     .CINVCTRL(1'b0),
     .DATAIN(in_ddr_clock_i),
     .CNTVALUEIN(5'b0),
