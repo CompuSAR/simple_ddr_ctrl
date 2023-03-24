@@ -262,9 +262,9 @@ always_ff@(posedge ddr_clock_i) begin
         ddr3_addr_o <= override_addr_ddr;
         ddr3_ba_o <= override_addr_ddr[31:31-BANK_BITS+1];
         ddr3_cke_o <= reset_state_ddr[5];
-        if( output_cmd==4'b0101 ) begin         // READ
+        if( override_cmd_ddr==4'b0101 ) begin         // READ
             bank_state <= BS_OP;
-            bypass_write <= 1'b1;
+            bypass_write <= 1'b0;
         end else
             output_cmd <= override_cmd_ddr;
     end else begin
