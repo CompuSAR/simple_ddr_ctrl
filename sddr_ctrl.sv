@@ -55,7 +55,7 @@ module sddr_ctrl#(
         output                                          ddr3_odt_o,
 //        output [DATA_BITS/8-1:0]                        ddr3_dm_o,
         output [DATA_BITS-1:0]                          ddr3_dq_o[1:0],
-        input [DATA_BITS-1:0]                           ddr3_dq_i[1:0],
+        input [DATA_BITS-1:0]                           ddr3_dq_i[BURST_LENGTH-1:0],
 
         output logic                                    data_transfer_o,
         output logic                                    data_write_o = 1'b0,
@@ -94,7 +94,7 @@ assign ddr3_odt_o               = reset_state_ddr[4] || !reset_state_ddr[4] && o
 assign write_level_o            = reset_state_ddr[6];
 assign dqs_out_o                = reset_state_ddr[7];
 
-logic [CMD_DATA_BITS-1:0] latched_write_data, read_data_ddr, latched_read_value;
+logic [CMD_DATA_BITS-1:0] latched_write_data, ordered_read_value, latched_read_value;
 logic [HALF_BURST_LENGTH*DATA_BITS-1:0] shift_value[1:0];
 
 assign ddr3_dq_o[0] = shift_value[0][DATA_BITS-1:0];
@@ -259,14 +259,15 @@ always_ff@(posedge ddr_clock_i) begin
 
     output_cmd <= 4'b0111;      // NOP
     if( bypass_ddr && override_cmd_ddr_ready ) begin
-        ddr3_addr_o <= override_addr_ddr;
-        ddr3_ba_o <= override_addr_ddr[31:31-BANK_BITS+1];
-        ddr3_cke_o <= reset_state_ddr[5];
         if( override_cmd_ddr==4'b0101 ) begin         // READ
             bank_state <= BS_OP;
             bypass_write <= 1'b0;
-        end else
+        end else begin
+            ddr3_addr_o <= override_addr_ddr;
+            ddr3_ba_o <= override_addr_ddr[31:31-BANK_BITS+1];
+            ddr3_cke_o <= reset_state_ddr[5];
             output_cmd <= override_cmd_ddr;
+        end
     end else begin
         ddr3_addr_o <= 0;
         ddr3_ba_o <= 0;
@@ -321,12 +322,17 @@ always_ff@(posedge ddr_clock_i) begin
                     data_write_o <= 1'b1;
                     odt_ddr <= 1'b1;
                 end
-                ddr3_ba_o <= data_cmd_address_ddr[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
-                ddr3_addr_o <= 0;
-                ddr3_addr_o[9:0] <= data_cmd_address_ddr[$clog2(DATA_BITS/8)+COL_BITS-1:$clog2(DATA_BITS/8)];
-                if( COL_BITS>10 )
-                    ddr3_addr_o[11] <= data_cmd_address_ddr[$clog2(DATA_BITS/8)+10];
-                ddr3_addr_o[10] <= 1'b1;       // Auto precharge
+                if( bypass_ddr ) begin
+                    ddr3_addr_o <= override_addr_ddr;
+                    ddr3_ba_o <= override_addr_ddr[31:31-BANK_BITS+1];
+                end else begin
+                    ddr3_ba_o <= data_cmd_address_ddr[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
+                    ddr3_addr_o <= 0;
+                    ddr3_addr_o[9:0] <= data_cmd_address_ddr[$clog2(DATA_BITS/8)+COL_BITS-1:$clog2(DATA_BITS/8)];
+                    if( COL_BITS>10 )
+                        ddr3_addr_o[11] <= data_cmd_address_ddr[$clog2(DATA_BITS/8)+10];
+                    ddr3_addr_o[10] <= 1'b1;       // Auto precharge
+                end
             end
             BS_WRITE: begin
                 bank_state_counter <= HALF_BURST_LENGTH;
@@ -334,7 +340,7 @@ always_ff@(posedge ddr_clock_i) begin
                 bank_state <= BS_WRITE_END;
             end
             BS_READ: begin
-                bank_state_counter <= HALF_BURST_LENGTH-1;
+                bank_state_counter <= HALF_BURST_LENGTH;
                 bank_state_counter_zero <= 1'b0;
                 bank_state <= BS_READ_END;
             end
@@ -356,6 +362,7 @@ always_ff@(posedge ddr_clock_i) begin
                 bank_state_counter <= tRP;
                 bank_state_counter_zero <= 1'b0;
 
+                latched_read_value <= ordered_read_value;
                 data_rsp_ready_ddr <= 1;
             end
         endcase
@@ -388,14 +395,11 @@ for( i=0; i<HALF_BURST_LENGTH; i++ ) begin : shift_value_gen
                 shift_value[1][HALF_BURST_LENGTH*DATA_BITS-1:(HALF_BURST_LENGTH-1)*DATA_BITS] <= ddr3_dq_i[1];
         end
     end
-
-    // Map the results
-    assign read_data_ddr[DATA_BITS*(i*2+1)-1:DATA_BITS*i*2] = shift_value[0][(i+1)*DATA_BITS-1:i*DATA_BITS];
-    assign read_data_ddr[DATA_BITS*(i+1)*2-1:DATA_BITS*(i*2+1)] = shift_value[1][(i+1)*DATA_BITS-1:i*DATA_BITS];
 end
 
-always_ff@(negedge ddr_clock_i)
-    latched_read_value <= read_data_ddr;
+for(i=0; i<BURST_LENGTH; ++i) begin : read_map
+    assign ordered_read_value[DATA_BITS*(i+1)-1:DATA_BITS*i] = ddr3_dq_i[i];
+end
 
 endgenerate
 
