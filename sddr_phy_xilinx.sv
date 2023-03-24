@@ -87,7 +87,7 @@ IDELAYCTRL dqs_clock_delay_ctrl(
 );
 
 logic delay_inc;
-logic dqs_clock;
+logic dqs_out_clock, dqs_in_clock;
 
 (* IODELAY_GROUP = "DQSCLOCK" *)
 IDELAYE2#(
@@ -103,7 +103,28 @@ IDELAYE2#(
     .DATAIN(in_ddr_clock_i),
     .CNTVALUEIN(5'b0),
     .CNTVALUEOUT(),
-    .DATAOUT(dqs_clock),
+    .DATAOUT(dqs_out_clock),
+    .INC(1'b1),
+    .LD(1'b0),
+    .LDPIPEEN(1'b0),
+    .REGRST(1'b0)
+);
+
+(* IODELAY_GROUP = "DQSCLOCK" *)
+IDELAYE2#(
+    .DELAY_SRC("DATAIN"),
+    .HIGH_PERFORMANCE_MODE("TRUE"),
+    .IDELAY_TYPE("VARIABLE"),
+    .REFCLK_FREQUENCY(303.1),
+    .SIGNAL_PATTERN("CLOCK")
+) in_data_delay(
+    .C(in_ddr_clock_i),
+    .CE(1'b0),
+    .CINVCTRL(1'b0),
+    .DATAIN(in_ddr_clock_i),
+    .CNTVALUEIN(5'b0),
+    .CNTVALUEOUT(),
+    .DATAOUT(dqs_in_clock),
     .INC(1'b1),
     .LD(1'b0),
     .LDPIPEEN(1'b0),
@@ -116,7 +137,7 @@ generate
         logic dqs_in;
         wire direction = !(ctl_data_write_i||ctl_out_dqs_i);
         IOBUFDS dqs_buffer(
-            .IO(ddr3_dqs_p_io[i]), .IOB(ddr3_dqs_n_io[i]), .O(dqs_in), .I(dqs_clock), .T( direction ));
+            .IO(ddr3_dqs_p_io[i]), .IOB(ddr3_dqs_n_io[i]), .O(dqs_in), .I(dqs_out_clock), .T( direction ));
     end : dqs_gen
 
     for(i=0; i<DATA_BITS; i++) begin : data_gen
@@ -136,10 +157,11 @@ generate
             .R(1'b0),
             .S(1'b0)
         );
+
         IDDR#(.DDR_CLK_EDGE("SAME_EDGE_PIPELINED")) data_in_ddr(
-            .C(dqs_gen[i/8].dqs_in),
+            .C(dqs_in_clock),
             .CE(1'b1),
-            .D(in_data_bit),
+            .D(in_data_bit_delayed),
             .Q1(ctl_dq_o[0][i]),
             .Q2(ctl_dq_o[1][i]),
             .R(1'b0),

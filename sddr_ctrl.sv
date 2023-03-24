@@ -58,7 +58,7 @@ module sddr_ctrl#(
         input [DATA_BITS-1:0]                           ddr3_dq_i[1:0],
 
         output logic                                    data_transfer_o,
-        output logic                                    data_write_o,
+        output logic                                    data_write_o = 1'b0,
         output                                          write_level_o,
         output                                          dqs_out_o
     );
@@ -76,10 +76,6 @@ logic [3:0] override_cmd_cpu, override_cmd_ddr, output_cmd;
 logic override_cmd_cpu_send = 1'b0, override_cmd_ddr_ready, override_cmd_cpu_received;
 logic [31:0] override_addr_cpu, override_addr_ddr;
 logic odt_ddr = 1'b0;
-
-// No read registers
-assign ctrl_rsp_ready = 1'b1;
-assign ctrl_rsp_data = 32'b0;
 
 assign ddr3_we_n_o = output_cmd[0];
 assign ddr3_cas_n_o = output_cmd[1];
@@ -136,8 +132,9 @@ logic data_cmd_ack_cpu;
 logic data_rsp_ready_ddr = 1'b0;
 logic refresh_pending_cpu = 1'b0, refresh_pending_ddr;
 logic refresh_pending_ack_ddr = 1'b0, refresh_pending_ack_cpu;
+logic bypass_write = 1'b0;
 
-assign data_cmd_ack = !data_cmd_valid_cpu && !data_cmd_ack_cpu && reset_state_cpu[3]; // Override off
+assign data_cmd_ack = !data_cmd_valid_cpu && !data_cmd_ack_cpu && !bypass_cpu;
 
 xpm_cdc_handshake#(
     .DEST_EXT_HSK(1),
@@ -156,6 +153,7 @@ xpm_cdc_handshake#(
     .src_send( data_cmd_valid_cpu || (data_cmd_valid && data_cmd_ack) )
 );
 
+logic rsp_ready;
 xpm_cdc_handshake#(
     .DEST_EXT_HSK(0),
     .WIDTH( CMD_DATA_BITS ),
@@ -170,8 +168,12 @@ xpm_cdc_handshake#(
     .dest_clk(cpu_clock_i),
     .dest_ack(),
     .dest_out( data_rsp_data_o ),
-    .dest_req( data_rsp_ready )
+    .dest_req( rsp_ready )
 );
+
+assign ctrl_rsp_data = data_rsp_data_o;
+assign data_rsp_ready = bypass_cpu ? 1'b0 : rsp_ready;
+assign ctrl_rsp_ready = bypass_cpu ? rsp_ready : 1'b0;
 
 xpm_cdc_single#(
     .SRC_INPUT_REG(0)
@@ -200,19 +202,30 @@ always_ff@(posedge cpu_clock_i) begin
     else
         override_cmd_cpu_send <= 1'b0;
 
-    if( ctrl_cmd_valid && ctrl_cmd_ack && ctrl_cmd_write ) begin
-        case(ctrl_cmd_address[15:0])
-            16'h0000: begin                             // Reset state
-                reset_state_cpu <= ctrl_cmd_data;
-            end
-            16'h0004: begin                             // Override command
-                override_cmd_cpu <= ctrl_cmd_data;
-                override_cmd_cpu_send <= 1'b1;
-            end
-            16'h0008: begin                             // Override address
-                override_addr_cpu <= ctrl_cmd_data;
-            end
-        endcase
+    if( ctrl_cmd_valid && ctrl_cmd_ack ) begin
+        if( ctrl_cmd_write ) begin
+            case(ctrl_cmd_address[15:0])
+                16'h0000: begin                             // Reset state
+                    reset_state_cpu <= ctrl_cmd_data;
+                end
+                16'h0004: begin                             // Override command
+                    override_cmd_cpu <= ctrl_cmd_data;
+                    override_cmd_cpu_send <= 1'b1;
+                end
+                16'h0008: begin                             // Override address
+                    override_addr_cpu <= ctrl_cmd_data;
+                end
+            endcase
+        end else begin
+            case(ctrl_cmd_address[15:0])
+                16'h000c: begin                             // Override mode read
+                    if(bypass_cpu) begin
+                        override_cmd_cpu <= 4'b0101;        // READ
+                        override_cmd_cpu_send <= 1'b1;
+                    end
+                end
+            endcase
+        end
     end
 
     if( data_cmd_ack && data_cmd_valid ) begin
@@ -239,25 +252,33 @@ end
 
 // DDR clock domain
 always_ff@(posedge ddr_clock_i) begin
+    if( !bank_state_counter_zero ) begin
+        bank_state_counter<=bank_state_counter-1;
+        bank_state_counter_zero <= bank_state_counter==1;
+    end
+
+    output_cmd <= 4'b0111;      // NOP
     if( bypass_ddr && override_cmd_ddr_ready ) begin
         ddr3_addr_o <= override_addr_ddr;
         ddr3_ba_o <= override_addr_ddr[31:31-BANK_BITS+1];
         ddr3_cke_o <= reset_state_ddr[5];
-        output_cmd <= override_cmd_ddr;
+        if( output_cmd==4'b0101 ) begin         // READ
+            bank_state <= BS_OP;
+            bypass_write <= 1'b1;
+        end else
+            output_cmd <= override_cmd_ddr;
     end else begin
-        output_cmd <= 4'b0111; // NOP
         ddr3_addr_o <= 0;
         ddr3_ba_o <= 0;
 
         if( refresh_pending_ack_ddr && !refresh_pending_ddr )
             refresh_pending_ack_ddr <= 1'b0;
+    end
 
-        if( !bank_state_counter_zero ) begin
-            bank_state_counter<=bank_state_counter-1;
-            bank_state_counter_zero <= bank_state_counter==1;
-        end else begin
-            case( bank_state )
-                BS_PRECHARGED: begin
+    if( bank_state_counter_zero ) begin
+        case( bank_state )
+            BS_PRECHARGED: begin
+                if( !bypass_ddr ) begin
                     if( refresh_pending_ddr ) begin
                         refresh_pending_ack_ddr <= 1'b1;
 
@@ -272,72 +293,72 @@ always_ff@(posedge ddr_clock_i) begin
                         data_cmd_ack_ddr <= 1'b1;
                     end
                 end
-                BS_ACTIVATE_ROW: begin
-                    data_rsp_ready_ddr <= 0;
+            end
+            BS_ACTIVATE_ROW: begin
+                data_rsp_ready_ddr <= 0;
 
-                    output_cmd <= 4'b0011; // Activate
-                    ddr3_ba_o <= data_cmd_address_ddr[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
-                    ddr3_addr_o <= data_cmd_address_ddr[COL_BITS+ROW_BITS-1:COL_BITS];
-                    current_op_write <= data_cmd_write_ddr;
-                    bank_state <= BS_OP;
-                    bank_state_counter <= tRCD;
+                output_cmd <= 4'b0011; // Activate
+                ddr3_ba_o <= data_cmd_address_ddr[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
+                ddr3_addr_o <= data_cmd_address_ddr[COL_BITS+ROW_BITS-1:COL_BITS];
+                current_op_write <= data_cmd_write_ddr;
+                bank_state <= BS_OP;
+                bank_state_counter <= tRCD;
+                bank_state_counter_zero <= 1'b0;
+            end
+            BS_OP: begin
+                data_cmd_ack_ddr <= 1'b0;
+                data_transfer_o <= 1'b1;
+                if( bypass_ddr ? !bypass_write : !data_cmd_write_ddr ) begin
+                    output_cmd <= 4'b0101;  // Read
+                    bank_state <= BS_READ;
+                    bank_state_counter <= casReadLatency+1;
                     bank_state_counter_zero <= 1'b0;
-                end
-                BS_OP: begin
-                    data_cmd_ack_ddr <= 1'b0;
-                    data_transfer_o <= 1'b1;
-                    if( !data_cmd_write_ddr ) begin
-                        output_cmd <= 4'b0101;  // Read
-                        bank_state <= BS_READ;
-                        bank_state_counter <= casReadLatency+1;
-                        bank_state_counter_zero <= 1'b0;
-                    end else begin
-                        output_cmd <= 4'b0100;  // Write
-                        bank_state <= BS_WRITE;
-                        bank_state_counter <= casWriteLatency-1;
-                        bank_state_counter_zero <= 1'b0;
-                        data_write_o <= 1'b1;
-                        odt_ddr <= 1'b1;
-                    end
-                    ddr3_ba_o <= data_cmd_address_ddr[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
-                    ddr3_addr_o <= 0;
-                    ddr3_addr_o[9:0] <= data_cmd_address_ddr[$clog2(DATA_BITS/8)+COL_BITS-1:$clog2(DATA_BITS/8)];
-                    if( COL_BITS>10 )
-                        ddr3_addr_o[11] <= data_cmd_address_ddr[$clog2(DATA_BITS/8)+10];
-                    ddr3_addr_o[10] <= 1'b1;       // Auto precharge
-                end
-                BS_WRITE: begin
-                    bank_state_counter <= HALF_BURST_LENGTH;
+                end else begin
+                    output_cmd <= 4'b0100;  // Write
+                    bank_state <= BS_WRITE;
+                    bank_state_counter <= casWriteLatency-1;
                     bank_state_counter_zero <= 1'b0;
-                    bank_state <= BS_WRITE_END;
+                    data_write_o <= 1'b1;
+                    odt_ddr <= 1'b1;
                 end
-                BS_READ: begin
-                    bank_state_counter <= HALF_BURST_LENGTH-1;
-                    bank_state_counter_zero <= 1'b0;
-                    bank_state <= BS_READ_END;
-                end
-                BS_WRITE_END: begin
-                    data_transfer_o <= 1'b0;
-                    data_write_o <= 1'b0;
+                ddr3_ba_o <= data_cmd_address_ddr[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
+                ddr3_addr_o <= 0;
+                ddr3_addr_o[9:0] <= data_cmd_address_ddr[$clog2(DATA_BITS/8)+COL_BITS-1:$clog2(DATA_BITS/8)];
+                if( COL_BITS>10 )
+                    ddr3_addr_o[11] <= data_cmd_address_ddr[$clog2(DATA_BITS/8)+10];
+                ddr3_addr_o[10] <= 1'b1;       // Auto precharge
+            end
+            BS_WRITE: begin
+                bank_state_counter <= HALF_BURST_LENGTH;
+                bank_state_counter_zero <= 1'b0;
+                bank_state <= BS_WRITE_END;
+            end
+            BS_READ: begin
+                bank_state_counter <= HALF_BURST_LENGTH-1;
+                bank_state_counter_zero <= 1'b0;
+                bank_state <= BS_READ_END;
+            end
+            BS_WRITE_END: begin
+                data_transfer_o <= 1'b0;
+                data_write_o <= 1'b0;
 
-                    bank_state <= BS_PRECHARGED;
-                    bank_state_counter <= tRP + write_recovery;
-                    bank_state_counter_zero <= 1'b0;
+                bank_state <= BS_PRECHARGED;
+                bank_state_counter <= tRP + write_recovery;
+                bank_state_counter_zero <= 1'b0;
 
-                    odt_ddr <= 1'b0;
-                end
-                BS_READ_END: begin
-                    data_transfer_o <= 1'b0;
-                    data_write_o <= 1'b0;
+                odt_ddr <= 1'b0;
+            end
+            BS_READ_END: begin
+                data_transfer_o <= 1'b0;
+                data_write_o <= 1'b0;
 
-                    bank_state <= BS_PRECHARGED;
-                    bank_state_counter <= tRP;
-                    bank_state_counter_zero <= 1'b0;
+                bank_state <= BS_PRECHARGED;
+                bank_state_counter <= tRP;
+                bank_state_counter_zero <= 1'b0;
 
-                    data_rsp_ready_ddr <= 1;
-                end
-            endcase
-        end
+                data_rsp_ready_ddr <= 1;
+            end
+        endcase
     end
 end
 
