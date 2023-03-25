@@ -2,7 +2,7 @@
 
 module sddr_ctrl#(
         BANK_BITS = 3,
-        ROW_BITS = 13,
+        ROW_BITS = 14,
         COL_BITS = 10,
         DATA_BITS = 16,
         BURST_LENGTH = 8,
@@ -64,7 +64,8 @@ module sddr_ctrl#(
         output                                          dqs_out_o
     );
 
-localparam ADDRESS_BITS = BANK_BITS+ROW_BITS+COL_BITS+$clog2(DATA_BITS/8);
+localparam PARITY_BITS = $clog2(DATA_BITS/8);
+localparam ADDRESS_BITS = BANK_BITS+ROW_BITS+COL_BITS+PARITY_BITS;
 localparam HALF_BURST_LENGTH = BURST_LENGTH/2;
 localparam CMD_DATA_BITS = BURST_LENGTH*DATA_BITS;
 
@@ -330,7 +331,7 @@ always_ff@(posedge ddr_clock_i) begin
 
                 output_cmd <= 4'b0011; // Activate
                 ddr3_ba_o <= data_cmd_address_ddr[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
-                ddr3_addr_o <= data_cmd_address_ddr[COL_BITS+ROW_BITS-1:COL_BITS];
+                ddr3_addr_o <= data_cmd_address_ddr[COL_BITS+ROW_BITS+PARITY_BITS-1:COL_BITS+PARITY_BITS];
                 current_op_write <= data_cmd_write_ddr;
                 bank_state <= BS_OP;
                 bank_state_counter <= tRCD;
@@ -358,9 +359,9 @@ always_ff@(posedge ddr_clock_i) begin
                 end else begin
                     ddr3_ba_o <= data_cmd_address_ddr[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
                     ddr3_addr_o <= 0;
-                    ddr3_addr_o[9:0] <= data_cmd_address_ddr[$clog2(DATA_BITS/8)+COL_BITS-1:$clog2(DATA_BITS/8)];
+                    ddr3_addr_o[9:0] <= data_cmd_address_ddr[COL_BITS+PARITY_BITS-1:PARITY_BITS];
                     if( COL_BITS>10 )
-                        ddr3_addr_o[11] <= data_cmd_address_ddr[$clog2(DATA_BITS/8)+10];
+                        ddr3_addr_o[11] <= data_cmd_address_ddr[PARITY_BITS+10];
                     ddr3_addr_o[10] <= 1'b1;       // Auto precharge
                 end
             end
