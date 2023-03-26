@@ -58,7 +58,7 @@ module sddr_ctrl#(
         input [DATA_BITS-1:0]                           ddr3_dq_i[BURST_LENGTH-1:0],
 
         output logic                                    data_transfer_o,
-        output logic                                    data_write_o = 1'b0,
+        output                                          data_write_o,
         output                                          write_level_o,
         output [31:0]                                   delay_inc_o,
         output                                          dqs_out_o
@@ -78,7 +78,12 @@ logic [3:0] override_cmd_cpu, override_cmd_ddr, output_cmd;
 logic override_cmd_cpu_send = 1'b0, override_cmd_ddr_ready, override_cmd_cpu_received;
 logic [31:0] override_addr_cpu, override_addr_ddr;
 logic odt_ddr = 1'b0;
+logic data_write_reg;
 
+logic[1:0] delay_inc_cpu=2'b0, delay_inc_ddr;
+logic delay_inc_send_cpu = 1'b0, delay_in_send_ddr, delay_inc_ack_cpu;
+
+assign data_write_o = data_write_reg;
 assign ddr3_we_n_o = output_cmd[0];
 assign ddr3_cas_n_o = output_cmd[1];
 assign ddr3_ras_n_o = output_cmd[2];
@@ -197,8 +202,6 @@ xpm_cdc_single#(
     .dest_out(refresh_pending_ack_cpu)
 );
 
-logic[1:0] delay_inc_cpu=2'b0, delay_inc_ddr;
-logic delay_inc_send_cpu = 1'b0, delay_in_send_ddr, delay_inc_ack_cpu;
 xpm_cdc_handshake#(
     .DEST_EXT_HSK(0),
     .DEST_SYNC_FF(2),
@@ -350,7 +353,7 @@ always_ff@(posedge ddr_clock_i) begin
                     bank_state <= BS_WRITE;
                     bank_state_counter <= casWriteLatency-1;
                     bank_state_counter_zero <= 1'b0;
-                    data_write_o <= 1'b1;
+                    data_write_reg <= 1'b1;
                     odt_ddr <= 1'b1;
                 end
                 if( bypass_ddr ) begin
@@ -377,7 +380,7 @@ always_ff@(posedge ddr_clock_i) begin
             end
             BS_WRITE_END: begin
                 data_transfer_o <= 1'b0;
-                data_write_o <= 1'b0;
+                data_write_reg <= 1'b0;
 
                 bank_state <= BS_PRECHARGED;
                 bank_state_counter <= tRP + write_recovery;
@@ -387,7 +390,7 @@ always_ff@(posedge ddr_clock_i) begin
             end
             BS_READ_END: begin
                 data_transfer_o <= 1'b0;
-                data_write_o <= 1'b0;
+                data_write_reg <= 1'b0;
 
                 bank_state <= BS_PRECHARGED;
                 bank_state_counter <= tRP;
