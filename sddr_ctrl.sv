@@ -105,10 +105,7 @@ assign ddr3_dq_o[1] = shift_value[1][DATA_BITS-1:0];
 localparam RefreshCounterBits = $clog2(tREFI);
 
 enum { BS_PRECHARGED, BS_ACTIVATE_ROW, BS_OP, BS_READ, BS_READ_END, BS_WRITE, BS_WRITE_END } bank_state = BS_PRECHARGED;
-function max(int a, int b)
-    max= a>b ? a : b;
-endfunction
-reg[$clog2(max(max(tRCD, tRC), max(tRP + write_recovery, tRFC)))-1:0] bank_state_counter = 0;
+reg[7:0] bank_state_counter = 0;
 reg[RefreshCounterBits-1:0] refresh_counter = tREFI;
 logic bank_state_counter_zero = 1'b0;
 
