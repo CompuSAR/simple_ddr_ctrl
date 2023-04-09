@@ -29,7 +29,7 @@ module sddr_ctrl#(
         input  [31:0]                                   ctrl_cmd_data,
         input                                           ctrl_cmd_write,
         output logic                                    ctrl_cmd_ack,
-        output                                          ctrl_rsp_ready,
+        output                                          ctrl_rsp_valid,
         output [31:0]                                   ctrl_rsp_data,
 
         // Data interfaces
@@ -38,7 +38,7 @@ module sddr_ctrl#(
                                                         data_cmd_address,
         input                                           data_cmd_write,
         output                                          data_cmd_ack,
-        output logic                                    data_rsp_ready,
+        output logic                                    data_rsp_valid,
         input [BURST_LENGTH*DATA_BITS-1:0]              data_cmd_data_i,
         output [BURST_LENGTH*DATA_BITS-1:0]             data_rsp_data_o,
 
@@ -136,7 +136,7 @@ logic[CMD_DATA_BITS-1:0] data_cmd_data_ddr;
 logic data_cmd_write_ddr, current_op_write;
 logic data_cmd_valid_cpu=1'b0, data_cmd_valid_ddr, data_cmd_ack_ddr=1'b0;
 logic data_cmd_ack_cpu;
-logic data_rsp_ready_ddr = 1'b0;
+logic data_rsp_valid_ddr = 1'b0;
 logic refresh_pending_cpu = 1'b0, refresh_pending_ddr;
 logic refresh_pending_ack_ddr = 1'b0, refresh_pending_ack_cpu;
 logic bypass_write = 1'b0;
@@ -160,7 +160,7 @@ xpm_cdc_handshake#(
     .src_send( data_cmd_valid_cpu || (data_cmd_valid && data_cmd_ack) )
 );
 
-logic rsp_ready;
+logic rsp_valid;
 xpm_cdc_handshake#(
     .DEST_EXT_HSK(0),
     .WIDTH( CMD_DATA_BITS ),
@@ -170,17 +170,17 @@ xpm_cdc_handshake#(
     .src_clk(ddr_clock_i),
     .src_in( latched_read_value ),
     .src_rcv( data_rsp_cdc_ack_ddr ),
-    .src_send( data_rsp_ready_ddr ),
+    .src_send( data_rsp_valid_ddr ),
 
     .dest_clk(cpu_clock_i),
     .dest_ack(),
     .dest_out( data_rsp_data_o ),
-    .dest_req( rsp_ready )
+    .dest_req( rsp_valid )
 );
 
 assign ctrl_rsp_data = data_rsp_data_o;
-assign data_rsp_ready = bypass_cpu ? 1'b0 : rsp_ready;
-assign ctrl_rsp_ready = bypass_cpu ? rsp_ready : 1'b0;
+assign data_rsp_valid = bypass_cpu ? 1'b0 : rsp_valid;
+assign ctrl_rsp_valid = bypass_cpu ? rsp_valid : 1'b0;
 
 xpm_cdc_single#(
     .SRC_INPUT_REG(0)
@@ -295,7 +295,7 @@ always_ff@(posedge ddr_clock_i) begin
         if( override_cmd_ddr==4'b0101 ) begin         // READ
             bank_state <= BS_OP;
             bypass_write <= 1'b0;
-            data_rsp_ready_ddr <= 0;
+            data_rsp_valid_ddr <= 0;
         end else begin
             ddr3_addr_o <= override_addr_ddr;
             ddr3_ba_o <= override_addr_ddr[31:31-BANK_BITS+1];
@@ -330,7 +330,7 @@ always_ff@(posedge ddr_clock_i) begin
                 end
             end
             BS_ACTIVATE_ROW: begin
-                data_rsp_ready_ddr <= 0;
+                data_rsp_valid_ddr <= 0;
 
                 output_cmd <= 4'b0011; // Activate
                 ddr3_ba_o <= data_cmd_address_ddr[ADDRESS_BITS-1:ADDRESS_BITS-BANK_BITS];
@@ -397,7 +397,7 @@ always_ff@(posedge ddr_clock_i) begin
                 bank_state_counter_zero <= 1'b0;
 
                 latched_read_value <= ordered_read_value;
-                data_rsp_ready_ddr <= 1;
+                data_rsp_valid_ddr <= 1;
             end
         endcase
     end
