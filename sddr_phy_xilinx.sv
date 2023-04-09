@@ -10,7 +10,6 @@ module sddr_phy_xilinx#(
         // Inside interfaces
         input in_cpu_clock_i,
         input in_ddr_clock_i,
-        input in_ddr_clock_90deg_i,
         input in_ddr_reset_n_i,
         input in_phy_reset_n_i,
 
