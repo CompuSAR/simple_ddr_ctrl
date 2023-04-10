@@ -51,7 +51,7 @@ module sddr_ctrl#(
         output                                          ddr3_cs_n_o,
 
         output logic [BANK_BITS-1:0]                    ddr3_ba_o,
-        output logic [ROW_BITS+$clog2(DATA_BITS/8)-1:0] ddr3_addr_o,
+        output logic [ROW_BITS-1:0]                     ddr3_addr_o,
         output                                          ddr3_odt_o,
 //        output [DATA_BITS/8-1:0]                        ddr3_dm_o,
         output [DATA_BITS-1:0]                          ddr3_dq_o[1:0],

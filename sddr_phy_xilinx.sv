@@ -2,7 +2,7 @@
 
 module sddr_phy_xilinx#(
         BANK_BITS = 3,
-        ROW_BITS = 13,
+        ROW_BITS = 14,
         COL_BITS = 10,
         DATA_BITS = 16
     )
@@ -20,7 +20,7 @@ module sddr_phy_xilinx#(
         input                                           ctl_ras_n_i,
         input                                           ctl_cas_n_i,
         input                                           ctl_we_n_i,
-        input [ROW_BITS+$clog2(DATA_BITS/8)-1:0]        ctl_addr_i,
+        input [ROW_BITS-1:0]                            ctl_addr_i,
         input [BANK_BITS-1:0]                           ctl_ba_i,
         input [DATA_BITS-1:0]                           ctl_dq_i[1:0],
         output [DATA_BITS-1:0]                          ctl_dq_o[7:0],
@@ -45,7 +45,7 @@ module sddr_phy_xilinx#(
         output                                          ddr3_cs_n_o,
 
         output logic [BANK_BITS-1:0]                    ddr3_ba_o,
-        output logic [ROW_BITS+$clog2(DATA_BITS/8)-1:0] ddr3_addr_o,
+        output logic [ROW_BITS-1:0]                     ddr3_addr_o,
         output logic                                    ddr3_odt_o,
         output [DATA_BITS/8-1:0]                        ddr3_dm_o,
         inout [DATA_BITS/8-1:0]                         ddr3_dqs_p_io,
