@@ -132,17 +132,19 @@ xpm_cdc_handshake#(
     .src_send(override_cmd_cpu_send)
 );
 
-logic[ADDRESS_BITS-1:0] data_cmd_address_ddr;
-logic[CMD_DATA_BITS-1:0] data_cmd_data_ddr;
-logic data_cmd_write_ddr, current_op_write;
-logic data_cmd_valid_cpu=1'b0, data_cmd_valid_ddr, data_cmd_ack_ddr=1'b0;
+logic[ADDRESS_BITS-1:0] data_cmd_address_cdc, data_cmd_address_cpu, data_cmd_address_ddr;
+logic[CMD_DATA_BITS-1:0] data_cmd_data_cdc, data_cmd_data_cpu, data_cmd_data_ddr;
+logic data_cmd_write_cdc, data_cmd_write_cpu, data_cmd_write_ddr, current_op_write;
+logic data_cmd_valid_cpu, data_cmd_valid_ddr, data_cmd_ack_ddr=1'b0;
 logic data_cmd_ack_cpu;
 logic data_rsp_valid_ddr = 1'b0;
 logic refresh_pending_cpu = 1'b0, refresh_pending_ddr;
 logic refresh_pending_ack_ddr = 1'b0, refresh_pending_ack_cpu;
 logic bypass_write = 1'b0;
 
-assign data_cmd_ack = !data_cmd_valid_cpu && !data_cmd_ack_cpu && !bypass_cpu;
+enum logic[1:0] { IDLE, WANT_SEND, SENT } data_cdc_state = IDLE;
+assign data_cmd_ack = data_cdc_state==IDLE && !bypass_cpu;
+assign data_cmd_valid_cpu = data_cdc_state==WANT_SEND;
 
 xpm_cdc_handshake#(
     .DEST_EXT_HSK(1),
@@ -153,13 +155,13 @@ xpm_cdc_handshake#(
 ) data_cmd_cdc(
     .dest_clk(ddr_clock_i),
     .dest_ack( data_cmd_ack_ddr ),
-    .dest_out( {data_cmd_address_ddr, data_cmd_write_ddr, data_cmd_data_ddr} ),
+    .dest_out( {data_cmd_address_cdc, data_cmd_write_cdc, data_cmd_data_cdc} ),
     .dest_req( data_cmd_valid_ddr ),
 
     .src_clk(cpu_clock_i),
-    .src_in( {data_cmd_address, data_cmd_write, data_cmd_data_i} ),
+    .src_in( {data_cmd_address_cpu, data_cmd_write_cpu, data_cmd_data_cpu} ),
     .src_rcv( data_cmd_ack_cpu ),
-    .src_send( data_cmd_valid_cpu || (data_cmd_valid && data_cmd_ack) )
+    .src_send( data_cmd_valid_cpu )
 );
 
 logic rsp_valid;
@@ -265,12 +267,25 @@ always_ff@(posedge cpu_clock_i) begin
         end
     end
 
-    if( data_cmd_ack && data_cmd_valid ) begin
-        data_cmd_valid_cpu <= 1'b1;
-    end
-    if( data_cmd_valid_cpu && data_cmd_ack_cpu ) begin
-        data_cmd_valid_cpu <= 1'b0;
-    end
+    case( data_cdc_state )
+        IDLE: begin
+            if( data_cmd_valid && data_cmd_ack ) begin
+                data_cdc_state <= WANT_SEND;
+
+                data_cmd_address_cpu <= data_cmd_address;
+                data_cmd_write_cpu <= data_cmd_write;
+                data_cmd_data_cpu <= data_cmd_data_i;
+            end
+        end
+        WANT_SEND: begin
+            if( data_cmd_ack_cpu )
+                data_cdc_state <= SENT;
+        end
+        SENT: begin
+            if( !data_cmd_ack_cpu )
+                data_cdc_state <= IDLE;
+        end
+    endcase
 end
 
 // Refresh counter management
@@ -330,6 +345,10 @@ always_ff@(posedge ddr_clock_i) begin
                         bank_state <= BS_ACTIVATE_ROW;
                         latched_write_data <= data_cmd_data_ddr;
                         data_cmd_ack_ddr <= 1'b1;
+
+                        data_cmd_address_ddr <= data_cmd_address_cdc;
+                        data_cmd_data_ddr <= data_cmd_data_cdc;
+                        data_cmd_write_ddr <= data_cmd_write_cdc;
                     end
                 end
             end
@@ -345,7 +364,6 @@ always_ff@(posedge ddr_clock_i) begin
                 bank_state_counter_zero <= 1'b0;
             end
             BS_OP: begin
-                data_cmd_ack_ddr <= 1'b0;
                 data_transfer_o <= 1'b1;
                 if( bypass_ddr ? !bypass_write : !data_cmd_write_ddr ) begin
                     output_cmd <= 4'b0101;  // Read
@@ -405,6 +423,9 @@ always_ff@(posedge ddr_clock_i) begin
             end
         endcase
     end
+
+    if( !data_cmd_valid_ddr && data_cmd_ack_ddr )
+        data_cmd_ack_ddr <= 1'b0;
 end
 
 
