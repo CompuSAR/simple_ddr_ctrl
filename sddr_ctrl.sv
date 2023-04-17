@@ -118,7 +118,8 @@ xpm_cdc_handshake#(
     .DEST_EXT_HSK(0),
     .WIDTH(32+4),
     .SRC_SYNC_FF(2),
-    .DEST_SYNC_FF(3)
+    .DEST_SYNC_FF(3),
+    .SIM_ASSERT_CHK(1)
 ) override_cmd_cdc(
     .dest_clk(ddr_clock_i),
     .dest_ack(),
@@ -147,7 +148,8 @@ xpm_cdc_handshake#(
     .DEST_EXT_HSK(1),
     .WIDTH( ADDRESS_BITS + 1 /* Write */ + CMD_DATA_BITS ),
     .SRC_SYNC_FF(2),
-    .DEST_SYNC_FF(3)
+    .DEST_SYNC_FF(3),
+    .SIM_ASSERT_CHK(1)
 ) data_cmd_cdc(
     .dest_clk(ddr_clock_i),
     .dest_ack( data_cmd_ack_ddr ),
@@ -165,7 +167,8 @@ xpm_cdc_handshake#(
     .DEST_EXT_HSK(0),
     .WIDTH( CMD_DATA_BITS ),
     .SRC_SYNC_FF(2),
-    .DEST_SYNC_FF(3)
+    .DEST_SYNC_FF(3),
+    .SIM_ASSERT_CHK(1)
 ) data_rsp_cdc(
     .src_clk(ddr_clock_i),
     .src_in( latched_read_value ),
@@ -206,7 +209,8 @@ xpm_cdc_handshake#(
     .DEST_EXT_HSK(0),
     .DEST_SYNC_FF(2),
     .SRC_SYNC_FF(2),
-    .WIDTH(2)
+    .WIDTH(2),
+    .SIM_ASSERT_CHK(1)
 ) delay_inc_cdc(
     .src_clk(cpu_clock_i),
     .src_in(delay_inc_cpu),
