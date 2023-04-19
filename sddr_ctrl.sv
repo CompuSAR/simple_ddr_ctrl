@@ -132,9 +132,9 @@ xpm_cdc_handshake#(
     .src_send(override_cmd_cpu_send)
 );
 
-logic[ADDRESS_BITS-1:0] data_cmd_address_ddr;
-logic[CMD_DATA_BITS-1:0] data_cmd_data_ddr;
-logic data_cmd_write_ddr, current_op_write;
+logic[ADDRESS_BITS-1:0] data_cmd_address_cdc_cpu, data_cmd_address_ddr;
+logic[CMD_DATA_BITS-1:0] data_cmd_data_cdc_cpu, data_cmd_data_ddr;
+logic data_cmd_write_cdc_cpu, data_cmd_write_ddr, current_op_write;
 logic data_cmd_valid_cpu=1'b0, data_cmd_valid_ddr, data_cmd_ack_ddr=1'b0;
 logic data_cmd_ack_cpu;
 logic data_rsp_valid_ddr = 1'b0;
@@ -157,9 +157,9 @@ xpm_cdc_handshake#(
     .dest_req( data_cmd_valid_ddr ),
 
     .src_clk(cpu_clock_i),
-    .src_in( {data_cmd_address, data_cmd_write, data_cmd_data_i} ),
+    .src_in( {data_cmd_address_cdc_cpu, data_cmd_write_cdc_cpu, data_cmd_data_cdc_cpu} ),
     .src_rcv( data_cmd_ack_cpu ),
-    .src_send( data_cmd_valid_cpu || (data_cmd_valid && data_cmd_ack) )
+    .src_send( data_cmd_valid_cpu )
 );
 
 logic rsp_valid;
@@ -267,6 +267,10 @@ always_ff@(posedge cpu_clock_i) begin
 
     if( data_cmd_ack && data_cmd_valid ) begin
         data_cmd_valid_cpu <= 1'b1;
+
+        data_cmd_address_cdc_cpu <= data_cmd_address;
+        data_cmd_write_cdc_cpu <= data_cmd_write;
+        data_cmd_data_cdc_cpu <= data_cmd_data_i;
     end
     if( data_cmd_valid_cpu && data_cmd_ack_cpu ) begin
         data_cmd_valid_cpu <= 1'b0;
@@ -345,7 +349,6 @@ always_ff@(posedge ddr_clock_i) begin
                 bank_state_counter_zero <= 1'b0;
             end
             BS_OP: begin
-                data_cmd_ack_ddr <= 1'b0;
                 data_transfer_o <= 1'b1;
                 if( bypass_ddr ? !bypass_write : !data_cmd_write_ddr ) begin
                     output_cmd <= 4'b0101;  // Read
@@ -405,6 +408,9 @@ always_ff@(posedge ddr_clock_i) begin
             end
         endcase
     end
+
+    if( data_cmd_ack_ddr && !data_cmd_valid_ddr )
+        data_cmd_ack_ddr <= 1'b0;
 end
 
 
