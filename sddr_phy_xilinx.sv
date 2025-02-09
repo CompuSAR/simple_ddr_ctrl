@@ -4,7 +4,8 @@ module sddr_phy_xilinx#(
         BANK_BITS = 3,
         ROW_BITS = 14,
         COL_BITS = 10,
-        DATA_BITS = 16
+        DATA_BITS = 16,
+        DDR_CLK_MHZ = 300
     )
     (
         // Inside interfaces
@@ -96,7 +97,7 @@ IDELAYE2#(
     .DELAY_SRC("DATAIN"),
     .HIGH_PERFORMANCE_MODE("TRUE"),
     .IDELAY_TYPE("VARIABLE"),
-    .REFCLK_FREQUENCY(303.1),
+    .REFCLK_FREQUENCY(DDR_CLK_MHZ),
     .SIGNAL_PATTERN("CLOCK")
 ) dqs_clock_delay(
     .C(in_ddr_clock_i),
@@ -117,7 +118,7 @@ IDELAYE2#(
     .DELAY_SRC("DATAIN"),
     .HIGH_PERFORMANCE_MODE("TRUE"),
     .IDELAY_TYPE("VARIABLE"),
-    .REFCLK_FREQUENCY(303.1),
+    .REFCLK_FREQUENCY(DDR_CLK_MHZ),
     .SIGNAL_PATTERN("CLOCK")
 ) in_data_delay(
     .C(in_ddr_clock_i),
